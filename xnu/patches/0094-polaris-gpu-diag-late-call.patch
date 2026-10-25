@@ -1,0 +1,34 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -6,6 +6,7 @@
+ #include <sys/systm.h>
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
++#include <machine/machine_routines.h>
+ 
+ extern bool polaris_touch_i2c_board(void);
+ 
+@@ -125,6 +126,8 @@
+ 	    "GPU/GMU/SMMU registers untouched, CPU display unchanged\n", missing);
+ 	printf("POLARIS GPU: ARC DB mapping deferred until XNU reservation ownership is proven\n");
++	/* Hold the screen so the diagnostic can be photographed. */
++	delay(20000);
+ }
+ #endif
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -488,6 +488,11 @@
+ 	platform_stall_panic_or_spin(PLATFORM_STALL_XNU_LOCATION_BSD_INIT);
+ #endif
+ 
++	/* Console is up here: report the A630 firmware handoff facts once. */
++	{
++		extern void polaris_gpu_diag(void);
++		polaris_gpu_diag();
++	}
++
+ #define DEBUG_BSDINIT 0
+ 
+ #if DEBUG_BSDINIT
