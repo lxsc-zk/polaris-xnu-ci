@@ -1,21 +1,19 @@
 diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
-index 28f609c..e749dd6 100644
+index 28f609c..16b25bb 100644
 --- a/bsd/dev/polaris_gpu_diag.c
 +++ b/bsd/dev/polaris_gpu_diag.c
-@@ -8,6 +8,7 @@
- #include <sys/systm.h>
- #include <pexpert/pexpert.h>
- #include <pexpert/device_tree.h>
-+#include <machine/machine_routines.h>
- 
- extern bool polaris_touch_i2c_board(void);
- 
-@@ -128,5 +129,7 @@ polaris_gpu_diag(void)
+@@ -128,5 +128,13 @@ polaris_gpu_diag(void)
  	printf("POLARIS GPU: %u/6 blobs missing; firmware metadata only; "
  	    "GPU/GMU/SMMU registers untouched, CPU display unchanged\n", missing);
  	printf("POLARIS GPU: ARC DB mapping deferred until XNU reservation ownership is proven\n");
-+	/* Hold the screen so the diagnostic can be photographed. */
-+	delay(20000);
++	/* Hold the screen long enough to photograph the lines above. */
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
  }
  #endif
 diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
