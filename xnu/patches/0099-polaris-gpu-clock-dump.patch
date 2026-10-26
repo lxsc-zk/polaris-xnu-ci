@@ -1,0 +1,88 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 0067f20..4660998 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -108,4 +108,68 @@ polaris_gpu_power_on_probe(void)
+ 		}
+ 	}
+ }
++
++/*
++ * Explicit opt-in (polarisgpu=3): after CX is powered, dump the GPUCC branch
++ * clocks and the two root generators. Read-only.
++ */
++struct gpu_clk_entry {
++	const char *name;
++	uint32_t offset;
++};
++
++static const struct gpu_clk_entry gpu_clks[] = {
++	{ "cxo_aon", 0x1004 }, { "gx_gfx3d", 0x1054 }, { "gx_vsense", 0x1058 },
++	{ "gx_gmu", 0x1064 }, { "crc_ahb", 0x107c }, { "cx_apb", 0x1088 },
++	{ "cx_snoc_dvm", 0x108c }, { "cx_gmu", 0x1098 }, { "cxo", 0x109c },
++	{ "cx_gfx3d", 0x10a4 }, { "cx_gfx3d_slv", 0x10a8 }, { "acd_cxo", 0x1164 },
++	{ "acd_ahb", 0x1168 },
++};
++
++void
++polaris_gpu_clock_dump(void)
++{
++	int optin = 0;
++	vm_offset_t base;
++	uint32_t gdscr, i;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 3) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	if (!base) {
++		printf("POLARIS GPU CLK: GPUCC map failed\n");
++		return;
++	}
++	gdscr = pwr_read(base, GDSC_CX);
++	if (!(gdscr & (1u << 31))) {
++		*(volatile uint32_t *)(base + GDSC_CX) = gdscr & ~1u;
++		for (i = 0; i < 2000; i++) {
++			gdscr = pwr_read(base, GDSC_CX);
++			if (gdscr & (1u << 31)) {
++				break;
++			}
++		}
++		printf("POLARIS GPU CLK: CX powered on first (0x%08x)\n", gdscr);
++	}
++	printf("POLARIS GPU CLK: GMU_RCG cmd=0x%08x GX_RCG cmd=0x%08x\n",
++	    pwr_read(base, 0x1120u), pwr_read(base, 0x101cu));
++	for (i = 0; i < sizeof(gpu_clks) / sizeof(gpu_clks[0]); i++) {
++		uint32_t v = pwr_read(base, gpu_clks[i].offset);
++		printf("POLARIS GPU CLK: %s @0x%04x = 0x%08x en=%u\n",
++		    gpu_clks[i].name, gpu_clks[i].offset, v, v & 1u);
++	}
++	printf("POLARIS GPU CLK: read-only dump done; no clock written\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
+ #endif
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 46e0d01..aeda802 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -503,6 +503,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_power_on_probe(void);
+ 		polaris_gpu_power_on_probe();
+ 	}
++	{
++		extern void polaris_gpu_clock_dump(void);
++		polaris_gpu_clock_dump();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
