@@ -1,0 +1,32 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 6dc2554..bb06d7e 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -431,15 +431,18 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/* Walk every candidate context bank and see whose TTBR0 keeps a value. */
+-	for (i = 0; i < 8; i++) {
+-		vm_offset_t cb = smmu + 0x8000u + i * 0x1000u;
+-		*(volatile uint64_t *)(cb + 0x20u) = 0x0000deadb000ull;
+-		pwr_delay();
+-		printf("POLARIS GPU SMMU: CB%u@0x%x TTBR0=0x%llx\n", i,
+-		    0x8000u + i * 0x1000u,
+-		    (unsigned long long)*(volatile uint64_t *)(cb + 0x20u));
+-		*(volatile uint64_t *)(cb + 0x20u) = 0ull;
++	/* Other plausible context-bank bases for a QCOM SMMU variant. */
++	{
++		static const uint32_t cand[] = { 0x0800u, 0x1000u, 0x2000u, 0x4000u };
++		for (i = 0; i < sizeof(cand) / sizeof(cand[0]); i++) {
++			vm_offset_t cb = smmu + cand[i];
++			*(volatile uint64_t *)(cb + 0x20u) = 0x0000deadb000ull;
++			pwr_delay();
++			printf("POLARIS GPU SMMU: base 0x%x TTBR0=0x%llx\n",
++			    cand[i],
++			    (unsigned long long)*(volatile uint64_t *)(cb + 0x20u));
++			*(volatile uint64_t *)(cb + 0x20u) = 0ull;
++		}
+ 	}
+ 	printf("POLARIS GPU SMMU: CB base test done\n");
+ 	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
