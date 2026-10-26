@@ -1,0 +1,80 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 2049e83..e18e301 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -322,6 +322,60 @@ polaris_gpu_gmu_probe(void)
+ 		printf("POLARIS GPU GMU: [0x506a000]=0x%08x read ok\n", v);
+ 	}
+ 	printf("POLARIS GPU GMU: probe done\n");
++}
++
++/*
++ * Explicit opt-in (polarisgpu=6): read-only identification of the GPU SMMU
++ * (arm,smmu-kgsl@5040000). Reads the SMMU v2 ID/control registers and the
++ * context bank state; writes nothing.
++ */
++#define SMMU_PA   0x5040000ull
++#define SMMU_LEN  0x10000ull
++#define SMMU_sCR0 0x000u
++#define SMMU_sIDR0 0x040u
++
++static uint32_t
++smmu_cb_reg(vm_offset_t base, uint32_t cb, uint32_t reg)
++{
++	return *(volatile uint32_t *)(base + 0x800u + cb * 0x80u + reg);
++}
++
++void
++polaris_gpu_smmu_probe(void)
++{
++	int optin = 0;
++	vm_offset_t base;
++	uint32_t i;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 6) {
++		return;
++	}
++	base = ml_io_map(SMMU_PA, SMMU_LEN);
++	if (!base) {
++		printf("POLARIS GPU SMMU: map failed\n");
++		return;
++	}
++	printf("POLARIS GPU SMMU: va=0x%llx (read-only)\n", (uint64_t)base);
++	printf("POLARIS GPU SMMU: sCR0=0x%08x\n", pwr_read(base, SMMU_sCR0));
++	printf("POLARIS GPU SMMU: IDR0=0x%08x IDR1=0x%08x\n",
++	    pwr_read(base, 0x040u), pwr_read(base, 0x044u));
++	printf("POLARIS GPU SMMU: IDR2=0x%08x IDR3=0x%08x\n",
++	    pwr_read(base, 0x048u), pwr_read(base, 0x04cu));
++	printf("POLARIS GPU SMMU: IDR4=0x%08x IDR5=0x%08x\n",
++	    pwr_read(base, 0x050u), pwr_read(base, 0x054u));
++	printf("POLARIS GPU SMMU: IDR6=0x%08x IDR7=0x%08x\n",
++	    pwr_read(base, 0x058u), pwr_read(base, 0x05cu));
++	for (i = 0; i < 8; i++) {
++		uint32_t sctlr = smmu_cb_reg(base, i, 0x00u);
++		uint32_t fsr = smmu_cb_reg(base, i, 0x58u);
++		printf("POLARIS GPU SMMU: CB%u SCTLR=0x%08x FSR=0x%08x\n",
++		    i, sctlr, fsr);
++	}
++	printf("POLARIS GPU SMMU: read-only probe done; nothing written\n");
+ 	{
+ 		volatile uint64_t spin = 0;
+ 		while (spin < 20000000000ull) {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 3b26fa8..47cb7e1 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -515,6 +515,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_gmu_probe(void);
+ 		polaris_gpu_gmu_probe();
+ 	}
++	{
++		extern void polaris_gpu_smmu_probe(void);
++		polaris_gpu_smmu_probe();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
