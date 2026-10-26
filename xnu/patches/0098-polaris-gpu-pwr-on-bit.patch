@@ -1,0 +1,32 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 20a3dfc..0067f20 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -77,13 +77,13 @@ polaris_gpu_power_on_probe(void)
+ 		return;
+ 	}
+ 	gdscr = pwr_read(base, GDSC_CX);
+-	on = (gdscr & (1u << 16)) != 0;
++	on = (gdscr & (1u << 31)) != 0;
+ 	printf("POLARIS GPU PWR: before CX=0x%08x pwr_on=%u\n", gdscr, on ? 1u : 0u);
+ 	if (!on) {
+ 		*(volatile uint32_t *)(base + GDSC_CX) = gdscr & ~1u;
+ 		for (i = 0; i < 2000; i++) {
+ 			gdscr = pwr_read(base, GDSC_CX);
+-			if (gdscr & (1u << 16)) {
++			if (gdscr & (1u << 31)) {
+ 				break;
+ 			}
+ 			{
+@@ -97,9 +97,9 @@ polaris_gpu_power_on_probe(void)
+ 	}
+ 	gdscr = pwr_read(base, GDSC_CX);
+ 	printf("POLARIS GPU PWR: after  CX=0x%08x pwr_on=%u (%u polls)\n",
+-	    gdscr, (gdscr & (1u << 16)) ? 1u : 0u, i);
++	    gdscr, (gdscr & (1u << 31)) ? 1u : 0u, i);
+ 	printf("POLARIS GPU PWR: CX %s; GX untouched; GMU not started\n",
+-	    (gdscr & (1u << 16)) ? "powered" : "still collapsed");
++	    (gdscr & (1u << 31)) ? "powered" : "still collapsed");
+ 	{
+ 		volatile uint64_t spin = 0;
+ 		while (spin < 20000000000ull) {
