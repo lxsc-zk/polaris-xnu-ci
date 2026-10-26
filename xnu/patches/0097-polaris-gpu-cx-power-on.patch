@@ -1,0 +1,76 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 7e271d8..20a3dfc 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -50,6 +50,56 @@ polaris_gpu_power_probe(void)
+ 	    pwr_read(base, 0x5000u), pwr_read(base, 0x5040u),
+ 	    pwr_read(base, 0x1000u));
+ 	printf("POLARIS GPU PWR: no register written; CPU display unchanged\n");
++}
++
++/*
++ * Explicit opt-in (polarisgpu=2): clear SW_COLLAPSE on the CX GDSC and poll
++ * the power-on status. No clock votes, no GMU traffic, no GX access.
++ */
++void
++polaris_gpu_power_on_probe(void)
++{
++	int optin = 0;
++	vm_offset_t base;
++	uint32_t gdscr, i;
++	bool on;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 2) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	if (!base) {
++		printf("POLARIS GPU PWR: GPUCC map failed\n");
++		return;
++	}
++	gdscr = pwr_read(base, GDSC_CX);
++	on = (gdscr & (1u << 16)) != 0;
++	printf("POLARIS GPU PWR: before CX=0x%08x pwr_on=%u\n", gdscr, on ? 1u : 0u);
++	if (!on) {
++		*(volatile uint32_t *)(base + GDSC_CX) = gdscr & ~1u;
++		for (i = 0; i < 2000; i++) {
++			gdscr = pwr_read(base, GDSC_CX);
++			if (gdscr & (1u << 16)) {
++				break;
++			}
++			{
++				volatile uint32_t spin = 0;
++				while (spin < 5000u) {
++					spin++;
++					__asm__ __volatile__("nop");
++				}
++			}
++		}
++	}
++	gdscr = pwr_read(base, GDSC_CX);
++	printf("POLARIS GPU PWR: after  CX=0x%08x pwr_on=%u (%u polls)\n",
++	    gdscr, (gdscr & (1u << 16)) ? 1u : 0u, i);
++	printf("POLARIS GPU PWR: CX %s; GX untouched; GMU not started\n",
++	    (gdscr & (1u << 16)) ? "powered" : "still collapsed");
+ 	{
+ 		volatile uint64_t spin = 0;
+ 		while (spin < 20000000000ull) {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 7dac48d..46e0d01 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -499,6 +499,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_power_probe(void);
+ 		polaris_gpu_power_probe();
+ 	}
++	{
++		extern void polaris_gpu_power_on_probe(void);
++		polaris_gpu_power_on_probe();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
