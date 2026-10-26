@@ -1,0 +1,16 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 16b25bb..86777d0 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -22,9 +22,9 @@ static const struct {
+ 	const char *name;
+ 	uint32_t size;
+ } gpu_blobs[GPU_BLOB_COUNT] = {
+-	{ "GPU-SQE", 32136 }, { "GPU-GMU", 32768 },
++	{ "GPU-SQE", 31072 }, { "GPU-GMU", 32768 },
+ 	{ "GPU-ZAP-MDT", 6684 }, { "GPU-ZAP-B00", 148 },
+-	{ "GPU-ZAP-B01", 6536 }, { "GPU-ZAP-B02", 1968 },
++	{ "GPU-ZAP-B01", 6536 }, { "GPU-ZAP-B02", 1952 },
+ };
+ 
+ /* ADT properties can be unaligned; copy rather than dereferencing as u64. */
