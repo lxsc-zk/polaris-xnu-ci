@@ -1,0 +1,55 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index bb06d7e..04f77ce 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -431,19 +431,37 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/* Other plausible context-bank bases for a QCOM SMMU variant. */
+-	{
+-		static const uint32_t cand[] = { 0x0800u, 0x1000u, 0x2000u, 0x4000u };
+-		for (i = 0; i < sizeof(cand) / sizeof(cand[0]); i++) {
+-			vm_offset_t cb = smmu + cand[i];
+-			*(volatile uint64_t *)(cb + 0x20u) = 0x0000deadb000ull;
+-			pwr_delay();
+-			printf("POLARIS GPU SMMU: base 0x%x TTBR0=0x%llx\n",
+-			    cand[i],
+-			    (unsigned long long)*(volatile uint64_t *)(cb + 0x20u));
+-			*(volatile uint64_t *)(cb + 0x20u) = 0ull;
+-		}
+-	}
++	/*
++	 * SMMU registers are banked secure/non-secure. arm-smmu computes the
++	 * non-secure alias of a global register as "base + 0x400", so try the
++	 * alias view for the global block and for context bank 0.
++	 */
++	printf("POLARIS GPU SMMU: sec sCR0=0x%08x ns sCR0=0x%08x\n",
++	    pwr_read(smmu, 0x000u), pwr_read(smmu, 0x400u));
++	printf("POLARIS GPU SMMU: sec ID0=0x%08x ns ID0=0x%08x\n",
++	    pwr_read(smmu, 0x020u), pwr_read(smmu, 0x420u));
++	pwr_write(smmu, 0x400u, 0x00200626u);
++	pwr_delay();
++	printf("POLARIS GPU SMMU: ns sCR0 reads 0x%08x\n", pwr_read(smmu, 0x400u));
++
++	printf("POLARIS GPU SMMU: CB0 secure TTBR0\n");
++	*(volatile uint64_t *)(smmu + 0x8020u) = 0x0000deadb000ull;
++	pwr_delay();
++	printf("POLARIS GPU SMMU: CB0 sec TTBR0=0x%llx\n",
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
++
++	printf("POLARIS GPU SMMU: CB0 non-secure TTBR0\n");
++	*(volatile uint64_t *)(smmu + 0x8420u) = 0x0000deadb000ull;
++	pwr_delay();
++	printf("POLARIS GPU SMMU: CB0 ns TTBR0=0x%llx (want 0xdeadb000)\n",
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8420u));
++
++	pwr_write(smmu, 0x8400u, 0x00000002u);
++	pwr_delay();
++	printf("POLARIS GPU SMMU: CB0 ns SCTLR=0x%08x (want 0x2)\n",
++	    pwr_read(smmu, 0x8400u));
++	pwr_write(smmu, 0x8400u, 0u);
++	*(volatile uint64_t *)(smmu + 0x8420u) = 0ull;
+ 	printf("POLARIS GPU SMMU: CB base test done\n");
+ 	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
+ 	{
