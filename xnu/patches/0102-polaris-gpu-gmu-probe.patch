@@ -1,0 +1,99 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index f586ae6..2049e83 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -249,6 +249,79 @@ polaris_gpu_clock_on_probe(void)
+ 		    branch_off[i], v, pwr_read(base, branch_off[i]));
+ 	}
+ 	printf("POLARIS GPU CLK: GX clocks untouched; GMU firmware not started\n");
++}
++
++/*
++ * Explicit opt-in (polarisgpu=5): set the cx_gmu WAKE/SLEEP fields the vendor
++ * probe uses, retry cx_apb, then read the GMU register block once.
++ * Read-only on the GMU; a bus hang here means the AHB clock is still gated.
++ */
++#define GMU_PA 0x506a000ull
++
++void
++polaris_gpu_gmu_probe(void)
++{
++	int optin = 0;
++	vm_offset_t base, gmu;
++	uint32_t v, i;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 5) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	if (!base) {
++		printf("POLARIS GPU GMU: GPUCC map failed\n");
++		return;
++	}
++	/* power CX and program the GMU root exactly as the polarisgpu=4 path */
++	v = pwr_read(base, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(base, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	pwr_write(base, 0x1128u, 0u);
++	pwr_write(base, 0x112cu, 0u);
++	pwr_write(base, 0x1130u, 0u);
++	pwr_write(base, 0x1124u, (pwr_read(base, 0x1124u) & ~(0xfu | 0x700u)) | 1u | (6u << 8));
++	pwr_write(base, 0x1120u, pwr_read(base, 0x1120u) | 0x2u);
++	pwr_write(base, 0x1120u, pwr_read(base, 0x1120u) | 0x1u);
++	for (i = 0; i < 5000; i++) {
++		if (!(pwr_read(base, 0x1120u) & 1u)) {
++			break;
++		}
++	}
++
++	/* vendor probe sets WAKE and SLEEP nibbles of the cx_gmu CBCR to 0xf */
++	v = pwr_read(base, 0x1098u);
++	pwr_write(base, 0x1098u, v | (0xfu << 4) | (0xfu << 8) | 1u);
++	printf("POLARIS GPU GMU: cx_gmu 0x%08x -> 0x%08x\n", v, pwr_read(base, 0x1098u));
++
++	v = pwr_read(base, 0x1088u);
++	pwr_write(base, 0x1088u, v | 1u);
++	pwr_delay();
++	printf("POLARIS GPU GMU: cx_apb 0x%08x -> 0x%08x\n", v, pwr_read(base, 0x1088u));
++	v = pwr_read(base, 0x107cu);
++	pwr_write(base, 0x107cu, v | 1u);
++	pwr_delay();
++	printf("POLARIS GPU GMU: crc_ahb 0x%08x -> 0x%08x\n", v, pwr_read(base, 0x107cu));
++
++	printf("POLARIS GPU GMU: mapping GMU block 0x%llx\n", (uint64_t)GMU_PA);
++	gmu = ml_io_map(GMU_PA, 0x1000u);
++	printf("POLARIS GPU GMU: va=0x%llx, first read follows\n", (uint64_t)gmu);
++	if (gmu) {
++		v = *(volatile uint32_t *)gmu;
++		printf("POLARIS GPU GMU: [0x506a000]=0x%08x read ok\n", v);
++	}
++	printf("POLARIS GPU GMU: probe done\n");
+ 	{
+ 		volatile uint64_t spin = 0;
+ 		while (spin < 20000000000ull) {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 2d9241b..3b26fa8 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -511,6 +511,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_clock_on_probe(void);
+ 		polaris_gpu_clock_on_probe();
+ 	}
++	{
++		extern void polaris_gpu_gmu_probe(void);
++		polaris_gpu_gmu_probe();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
