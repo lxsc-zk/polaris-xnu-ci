@@ -1,0 +1,94 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+index dadd587..cd34713 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -114,6 +114,7 @@ bsd/dev/sweet_usb.c			standard
+ bsd/dev/polaris_touch_diag.c		standard
+ bsd/dev/polaris_touch_i2c.c		standard
+ bsd/dev/polaris_gpu_diag.c		standard
++bsd/dev/polaris_gpu_power.c		standard
+ bsd/dev/polaris_gpu.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+new file mode 100644
+index 0000000..7e271d8
+--- /dev/null
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -0,0 +1,61 @@
++/*
++ * Polaris A630 GPU power/clock read-only probe. NOT a GPU driver.
++ * Reads GPUCC and the CX/GX GDSC status only; writes no register, starts no
++ * firmware and keeps the CPU framebuffer as the only display path.
++ */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <pexpert/pexpert.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern bool polaris_touch_i2c_board(void);
++
++#define GPUCC_PA   0x5090000ull
++#define GPUCC_LEN  0x10000ull
++#define GDSC_CX    0x106cu
++#define GDSC_GX    0x100cu
++#define HW_CTRL    0x1540u
++
++static uint32_t
++pwr_read(vm_offset_t base, uint32_t offset)
++{
++	return *(volatile uint32_t *)(base + offset);
++}
++
++void
++polaris_gpu_power_probe(void)
++{
++	int optin = 0;
++	vm_offset_t base;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 1) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	if (!base) {
++		printf("POLARIS GPU PWR: GPUCC map failed\n");
++		return;
++	}
++	printf("POLARIS GPU PWR: GPUCC va=0x%llx (read-only)\n",
++	    (uint64_t)base);
++	printf("POLARIS GPU PWR: GDSC_CX=0x%08x GDSC_GX=0x%08x HW_CTRL=0x%08x\n",
++	    pwr_read(base, GDSC_CX), pwr_read(base, GDSC_GX),
++	    pwr_read(base, HW_CTRL));
++	printf("POLARIS GPU PWR: GMU_CLK=0x%08x GFX3D_CLK=0x%08x CTRL=0x%08x\n",
++	    pwr_read(base, 0x5000u), pwr_read(base, 0x5040u),
++	    pwr_read(base, 0x1000u));
++	printf("POLARIS GPU PWR: no register written; CPU display unchanged\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++#endif
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 8f14c04..7dac48d 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -495,6 +495,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_diag(void);
+ 		polaris_gpu_diag();
+ 	}
++	{
++		extern void polaris_gpu_power_probe(void);
++		polaris_gpu_power_probe();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
