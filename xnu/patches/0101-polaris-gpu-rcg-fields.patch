@@ -1,0 +1,28 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index c9872de..f586ae6 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -222,15 +222,18 @@ polaris_gpu_clock_on_probe(void)
+ 	cmd = pwr_read(base, 0x1120u);
+ 	cfg = pwr_read(base, 0x1124u);
+ 	printf("POLARIS GPU CLK: GMU cmd=0x%08x cfg=0x%08x before\n", cmd, cfg);
+-	/* M/N/D = 0, source 6 (GPLL0 divider), divide by 1.5, mode 0 */
++	/* clk-rcg2: CFG bits0-3 src_div (0=1, 1=1.5), bits8-10 src_sel; 6=GPLL0_DIV */
+ 	pwr_write(base, 0x1128u, 0u);
+ 	pwr_write(base, 0x112cu, 0u);
+ 	pwr_write(base, 0x1130u, 0u);
+-	pwr_write(base, 0x1124u, (cfg & ~0xf7u) | (1u << 4) | 6u);
+-	pwr_write(base, 0x1120u, (cmd & ~0x7u) | 0x4u);
+-	for (i = 0; i < 2000; i++) {
++	pwr_write(base, 0x1124u, (cfg & ~(0xfu | 0x700u)) | 1u | (6u << 8));
++	/* CMD: ROOT_EN (bit1), then UPDATE (bit0) commits; poll UPDATE clear */
++	cmd = pwr_read(base, 0x1120u);
++	pwr_write(base, 0x1120u, cmd | 0x2u);
++	pwr_write(base, 0x1120u, pwr_read(base, 0x1120u) | 0x1u);
++	for (i = 0; i < 5000; i++) {
+ 		cmd = pwr_read(base, 0x1120u);
+-		if (!(cmd & (1u << 31))) {
++		if (!(cmd & 0x1u)) {
+ 			break;
+ 		}
+ 		pwr_delay();
