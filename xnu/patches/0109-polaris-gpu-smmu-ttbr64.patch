@@ -1,0 +1,38 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index e444086..b2fd128 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -431,22 +431,19 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/*
+-	 * Decide the real context bank base with a write/read-back of TTBR0
+-	 * (0x20). Safe while SCTLR.M is clear, and restored afterwards.
+-	 */
+-	printf("POLARIS GPU SMMU: write-test CB0@0x1000 TTBR0\n");
+-	pwr_write(smmu, 0x1000u + 0x20u, 0xdeadb000u);
++	/* TTBR0 is a 64-bit register (kgsl uses SET_CTX_REG_Q for it). */
++	printf("POLARIS GPU SMMU: 64-bit TTBR0 write @0x8020\n");
++	*(volatile uint64_t *)(smmu + 0x8020u) = 0x0000deadb000ull;
+ 	pwr_delay();
+-	printf("POLARIS GPU SMMU: 0x1000 TTBR0 reads 0x%08x (want 0xdeadb000)\n",
+-	    pwr_read(smmu, 0x1000u + 0x20u));
+-	pwr_write(smmu, 0x1000u + 0x20u, 0u);
+-	printf("POLARIS GPU SMMU: write-test CB0@0x8000 TTBR0\n");
+-	pwr_write(smmu, 0x8000u + 0x20u, 0xdeadb000u);
++	printf("POLARIS GPU SMMU: 0x8020 TTBR0=0x%llx (want 0xdeadb000)\n",
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
++	*(volatile uint64_t *)(smmu + 0x8020u) = 0ull;
++	printf("POLARIS GPU SMMU: 64-bit SCTLR write @0x8000\n");
++	*(volatile uint32_t *)(smmu + 0x8000u) = 0x00000002u;
+ 	pwr_delay();
+-	printf("POLARIS GPU SMMU: 0x8000 TTBR0 reads 0x%08x (want 0xdeadb000)\n",
+-	    pwr_read(smmu, 0x8000u + 0x20u));
+-	pwr_write(smmu, 0x8000u + 0x20u, 0u);
++	printf("POLARIS GPU SMMU: 0x8000 SCTLR=0x%08x (want 0x2)\n",
++	    pwr_read(smmu, 0x8000u));
++	*(volatile uint32_t *)(smmu + 0x8000u) = 0u;
+ 	printf("POLARIS GPU SMMU: CB base test done\n");
+ 	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
+ 	{
