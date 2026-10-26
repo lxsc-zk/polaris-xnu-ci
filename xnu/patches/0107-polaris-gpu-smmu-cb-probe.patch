@@ -1,0 +1,37 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 7b00ec2..057f1e9 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -422,20 +422,18 @@ polaris_gpu_smmu_clocks(void)
+ 		return;
+ 	}
+ 	printf("POLARIS GPU SMMU: sCR0=0x%08x\n", pwr_read(smmu, 0x000u));
+-	/* qcom,smmu-v2 keys its ID registers at 0x20..0x3c, not 0x40..0x5c */
+-	for (i = 0; i < 8; i++) {
+-		printf("POLARIS GPU SMMU: ID%u=0x%08x\n", i,
+-		    pwr_read(smmu, 0x20u + i * 4u));
+-	}
+-	printf("POLARIS GPU SMMU: impl 0x6000=0x%08x 0x6060=0x%08x\n",
+-	    pwr_read(smmu, 0x6000u), pwr_read(smmu, 0x6060u));
+-	printf("POLARIS GPU SMMU: impl 0x6800=0x%08x 0x6900=0x%08x\n",
+-	    pwr_read(smmu, 0x6800u), pwr_read(smmu, 0x6900u));
+-	for (i = 0; i < 8; i++) {
+-		vm_offset_t cb = smmu + 0x8000u + i * 0x1000u;
+-		printf("POLARIS GPU SMMU: CB%u SCTLR=0x%08x FSR=0x%08x\n",
+-		    i, pwr_read(cb, 0x00u), pwr_read(cb, 0x58u));
+-	}
++	printf("POLARIS GPU SMMU: ID0=0x%08x ID1=0x%08x ID2=0x%08x\n",
++	    pwr_read(smmu, 0x20u), pwr_read(smmu, 0x24u), pwr_read(smmu, 0x28u));
++	/* Probe the two candidate CB0 bases, announcing each read first so a
++	 * fault still leaves the failure point on screen. */
++	printf("POLARIS GPU SMMU: reading CB0@0x1000 ...\n");
++	printf("POLARIS GPU SMMU: CB0@0x1000 SCTLR=0x%08x\n",
++	    pwr_read(smmu, 0x1000u));
++	printf("POLARIS GPU SMMU: reading CB0@0x8000 ...\n");
++	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
++	    pwr_read(smmu, 0x8000u));
++	printf("POLARIS GPU SMMU: reading impl@0x6000 ...\n");
++	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+ 	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
+ 	{
+ 		volatile uint64_t spin = 0;
