@@ -1,0 +1,108 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 4660998..c9872de 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -164,6 +164,88 @@ polaris_gpu_clock_dump(void)
+ 		    gpu_clks[i].name, gpu_clks[i].offset, v, v & 1u);
+ 	}
+ 	printf("POLARIS GPU CLK: read-only dump done; no clock written\n");
++}
++
++/*
++ * Explicit opt-in (polarisgpu=4): program the GMU root generator to the
++ * 200 MHz GPLL0 source (no GPU PLL needed) and enable the CX/APB branches.
++ * GX stays off; no GMU firmware is started.
++ */
++static void
++pwr_write(vm_offset_t base, uint32_t offset, uint32_t value)
++{
++	*(volatile uint32_t *)(base + offset) = value;
++}
++
++static void
++pwr_delay(void)
++{
++	volatile uint32_t i = 0;
++	while (i < 20000u) {
++		i++;
++		__asm__ __volatile__("nop");
++	}
++}
++
++void
++polaris_gpu_clock_on_probe(void)
++{
++	int optin = 0;
++	vm_offset_t base;
++	uint32_t gdscr, cmd, cfg, i;
++	static const uint32_t branch_off[] = { 0x107cu, 0x1088u, 0x1098u };
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 4) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	if (!base) {
++		printf("POLARIS GPU CLK: GPUCC map failed\n");
++		return;
++	}
++	gdscr = pwr_read(base, GDSC_CX);
++	if (!(gdscr & (1u << 31))) {
++		pwr_write(base, GDSC_CX, gdscr & ~1u);
++		for (i = 0; i < 2000; i++) {
++			gdscr = pwr_read(base, GDSC_CX);
++			if (gdscr & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	printf("POLARIS GPU CLK: CX=0x%08x\n", pwr_read(base, GDSC_CX));
++
++	cmd = pwr_read(base, 0x1120u);
++	cfg = pwr_read(base, 0x1124u);
++	printf("POLARIS GPU CLK: GMU cmd=0x%08x cfg=0x%08x before\n", cmd, cfg);
++	/* M/N/D = 0, source 6 (GPLL0 divider), divide by 1.5, mode 0 */
++	pwr_write(base, 0x1128u, 0u);
++	pwr_write(base, 0x112cu, 0u);
++	pwr_write(base, 0x1130u, 0u);
++	pwr_write(base, 0x1124u, (cfg & ~0xf7u) | (1u << 4) | 6u);
++	pwr_write(base, 0x1120u, (cmd & ~0x7u) | 0x4u);
++	for (i = 0; i < 2000; i++) {
++		cmd = pwr_read(base, 0x1120u);
++		if (!(cmd & (1u << 31))) {
++			break;
++		}
++		pwr_delay();
++	}
++	printf("POLARIS GPU CLK: GMU cmd=0x%08x cfg=0x%08x after %u waits\n",
++	    pwr_read(base, 0x1120u), pwr_read(base, 0x1124u), i);
++
++	for (i = 0; i < sizeof(branch_off) / sizeof(branch_off[0]); i++) {
++		uint32_t v = pwr_read(base, branch_off[i]);
++		pwr_write(base, branch_off[i], v | 1u);
++		pwr_delay();
++		printf("POLARIS GPU CLK: branch 0x%04x 0x%08x -> 0x%08x\n",
++		    branch_off[i], v, pwr_read(base, branch_off[i]));
++	}
++	printf("POLARIS GPU CLK: GX clocks untouched; GMU firmware not started\n");
+ 	{
+ 		volatile uint64_t spin = 0;
+ 		while (spin < 20000000000ull) {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index aeda802..2d9241b 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -507,6 +507,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_clock_dump(void);
+ 		polaris_gpu_clock_dump();
+ 	}
++	{
++		extern void polaris_gpu_clock_on_probe(void);
++		polaris_gpu_clock_on_probe();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
