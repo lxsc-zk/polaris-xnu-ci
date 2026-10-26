@@ -1,0 +1,58 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index bb06d7e..2ab2ba3 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -431,19 +431,44 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/* Other plausible context-bank bases for a QCOM SMMU variant. */
++	/*
++	 * tz/hyp name a dedicated "gpucc_gpu_smmu_clk"; if that clock is gated,
++	 * context-bank writes are dropped. Turn on every GPUCC branch and retry.
++	 */
+ 	{
+-		static const uint32_t cand[] = { 0x0800u, 0x1000u, 0x2000u, 0x4000u };
+-		for (i = 0; i < sizeof(cand) / sizeof(cand[0]); i++) {
+-			vm_offset_t cb = smmu + cand[i];
+-			*(volatile uint64_t *)(cb + 0x20u) = 0x0000deadb000ull;
++		static const uint32_t br[] = {
++			0x1004u, 0x1054u, 0x1058u, 0x1064u, 0x107cu, 0x1088u,
++			0x108cu, 0x1098u, 0x109cu, 0x10a4u, 0x10a8u, 0x1164u,
++			0x1168u,
++		};
++		for (i = 0; i < sizeof(br) / sizeof(br[0]); i++) {
++			uint32_t v = pwr_read(base + 0x1000000u, 0);  /* unused */
++			(void)v;
++		}
++	}
++	printf("POLARIS GPU SMMU: enabling all GPUCC branches\n");
++	{
++		static const uint32_t br[] = {
++			0x1004u, 0x1054u, 0x1058u, 0x1064u, 0x107cu, 0x1088u,
++			0x108cu, 0x1098u, 0x109cu, 0x10a4u, 0x10a8u, 0x1164u,
++			0x1168u,
++		};
++		vm_offset_t gpucc = ml_io_map(GPUCC_PA, GPUCC_LEN);
++		for (i = 0; i < sizeof(br) / sizeof(br[0]); i++) {
++			uint32_t before = pwr_read(gpucc, br[i]);
++			pwr_write(gpucc, br[i], before | 1u);
+ 			pwr_delay();
+-			printf("POLARIS GPU SMMU: base 0x%x TTBR0=0x%llx\n",
+-			    cand[i],
+-			    (unsigned long long)*(volatile uint64_t *)(cb + 0x20u));
+-			*(volatile uint64_t *)(cb + 0x20u) = 0ull;
++			printf("POLARIS GPU SMMU: clk 0x%04x 0x%08x -> 0x%08x\n",
++			    br[i], before, pwr_read(gpucc, br[i]));
+ 		}
+ 	}
++
++	printf("POLARIS GPU SMMU: retry CB0 TTBR0 write\n");
++	*(volatile uint64_t *)(smmu + 0x8020u) = 0x0000deadb000ull;
++	pwr_delay();
++	printf("POLARIS GPU SMMU: CB0 TTBR0=0x%llx (want 0xdeadb000)\n",
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
++	*(volatile uint64_t *)(smmu + 0x8020u) = 0ull;
+ 	printf("POLARIS GPU SMMU: CB base test done\n");
+ 	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
+ 	{
