@@ -1,0 +1,37 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index e18e301..a45015f 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -360,20 +360,19 @@ polaris_gpu_smmu_probe(void)
+ 		return;
+ 	}
+ 	printf("POLARIS GPU SMMU: va=0x%llx (read-only)\n", (uint64_t)base);
+-	printf("POLARIS GPU SMMU: sCR0=0x%08x\n", pwr_read(base, SMMU_sCR0));
+-	printf("POLARIS GPU SMMU: IDR0=0x%08x IDR1=0x%08x\n",
+-	    pwr_read(base, 0x040u), pwr_read(base, 0x044u));
+-	printf("POLARIS GPU SMMU: IDR2=0x%08x IDR3=0x%08x\n",
+-	    pwr_read(base, 0x048u), pwr_read(base, 0x04cu));
+-	printf("POLARIS GPU SMMU: IDR4=0x%08x IDR5=0x%08x\n",
+-	    pwr_read(base, 0x050u), pwr_read(base, 0x054u));
+-	printf("POLARIS GPU SMMU: IDR6=0x%08x IDR7=0x%08x\n",
+-	    pwr_read(base, 0x058u), pwr_read(base, 0x05cu));
++	/* GR0 register scan, 0x00..0x7c */
++	for (i = 0; i < 32; i++) {
++		printf("POLARIS GPU SMMU: GR0[0x%02x]=0x%08x\n", i * 4u,
++		    pwr_read(base, i * 4u));
++	}
++	/*
++	 * Context banks: arm-smmu puts them at base + (size >> 1), one per
++	 * (1 << pgshift) bytes; this SMMU maps 0x10000, so CB0 is at 0x8000.
++	 */
+ 	for (i = 0; i < 8; i++) {
+-		uint32_t sctlr = smmu_cb_reg(base, i, 0x00u);
+-		uint32_t fsr = smmu_cb_reg(base, i, 0x58u);
+-		printf("POLARIS GPU SMMU: CB%u SCTLR=0x%08x FSR=0x%08x\n",
+-		    i, sctlr, fsr);
++		vm_offset_t cb = base + 0x8000u + i * 0x1000u;
++		printf("POLARIS GPU SMMU: CB%u SCTLR=0x%08x FSR=0x%08x FAR=0x%08x\n",
++		    i, pwr_read(cb, 0x00u), pwr_read(cb, 0x58u), pwr_read(cb, 0x60u));
+ 	}
+ 	printf("POLARIS GPU SMMU: read-only probe done; nothing written\n");
+ 	{
