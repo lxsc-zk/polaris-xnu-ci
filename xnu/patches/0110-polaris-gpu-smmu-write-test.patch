@@ -1,0 +1,41 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index b2fd128..b5d4cfe 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -431,19 +431,25 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/* TTBR0 is a 64-bit register (kgsl uses SET_CTX_REG_Q for it). */
+-	printf("POLARIS GPU SMMU: 64-bit TTBR0 write @0x8020\n");
+-	*(volatile uint64_t *)(smmu + 0x8020u) = 0x0000deadb000ull;
++	/* Which part of the block accepts non-secure writes at all? */
++	printf("POLARIS GPU SMMU: write impl 0x6000\n");
++	pwr_write(smmu, 0x6000u, 0x2379u);
+ 	pwr_delay();
+-	printf("POLARIS GPU SMMU: 0x8020 TTBR0=0x%llx (want 0xdeadb000)\n",
+-	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
+-	*(volatile uint64_t *)(smmu + 0x8020u) = 0ull;
+-	printf("POLARIS GPU SMMU: 64-bit SCTLR write @0x8000\n");
+-	*(volatile uint32_t *)(smmu + 0x8000u) = 0x00000002u;
++	printf("POLARIS GPU SMMU: 0x6000 reads 0x%08x (want 0x2379)\n",
++	    pwr_read(smmu, 0x6000u));
++	pwr_write(smmu, 0x6000u, 0x2378u);
++	printf("POLARIS GPU SMMU: write impl 0x6800\n");
++	pwr_write(smmu, 0x6800u, 0x00000007u);
+ 	pwr_delay();
+-	printf("POLARIS GPU SMMU: 0x8000 SCTLR=0x%08x (want 0x2)\n",
+-	    pwr_read(smmu, 0x8000u));
+-	*(volatile uint32_t *)(smmu + 0x8000u) = 0u;
++	printf("POLARIS GPU SMMU: 0x6800 reads 0x%08x (want 0x7)\n",
++	    pwr_read(smmu, 0x6800u));
++	printf("POLARIS GPU SMMU: write sCR0 clientpd\n");
++	pwr_write(smmu, 0x0000u, 0x00200627u);
++	pwr_delay();
++	printf("POLARIS GPU SMMU: sCR0 reads 0x%08x (want 0x200627)\n",
++	    pwr_read(smmu, 0x0000u));
++	pwr_write(smmu, 0x0000u, 0x00200626u);
++	printf("POLARIS GPU SMMU: sCR0 restored 0x%08x\n", pwr_read(smmu, 0x0000u));
+ 	printf("POLARIS GPU SMMU: CB base test done\n");
+ 	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
+ 	{
