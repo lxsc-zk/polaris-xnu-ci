@@ -1,0 +1,78 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index a45015f..355387e 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -375,6 +375,58 @@ polaris_gpu_smmu_probe(void)
+ 		    i, pwr_read(cb, 0x00u), pwr_read(cb, 0x58u), pwr_read(cb, 0x60u));
+ 	}
+ 	printf("POLARIS GPU SMMU: read-only probe done; nothing written\n");
++}
++
++/*
++ * Explicit opt-in (polarisgpu=7): enable the GCC-side GPU clocks the SMMU
++ * needs (cfg_ahb, memnoc_gfx, snoc_dvm_gfx), then read back the SMMU global
++ * registers that faulted while those clocks were off.
++ */
++#define GCC_PA   0x100000ull
++#define GCC_LEN  0x100000ull
++
++void
++polaris_gpu_smmu_clocks(void)
++{
++	int optin = 0;
++	vm_offset_t gcc, smmu;
++	uint32_t v, i;
++	static const struct { const char *name; uint32_t off; } clks[] = {
++		{ "cfg_ahb", 0x71004u }, { "memnoc_gfx", 0x7100cu },
++		{ "snoc_dvm_gfx", 0x71018u }, { "iref", 0x8c010u },
++	};
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 7) {
++		return;
++	}
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	if (!gcc) {
++		printf("POLARIS GPU SMMU: GCC map failed\n");
++		return;
++	}
++	for (i = 0; i < sizeof(clks) / sizeof(clks[0]); i++) {
++		v = pwr_read(gcc, clks[i].off);
++		pwr_write(gcc, clks[i].off, v | 1u);
++		pwr_delay();
++		printf("POLARIS GPU SMMU: gcc_%s 0x%08x -> 0x%08x\n",
++		    clks[i].name, v, pwr_read(gcc, clks[i].off));
++	}
++
++	smmu = ml_io_map(SMMU_PA, SMMU_LEN);
++	if (!smmu) {
++		printf("POLARIS GPU SMMU: SMMU map failed\n");
++		return;
++	}
++	printf("POLARIS GPU SMMU: sCR0=0x%08x\n", pwr_read(smmu, 0x000u));
++	for (i = 0; i < 8; i++) {
++		printf("POLARIS GPU SMMU: IDR%u=0x%08x\n", i,
++		    pwr_read(smmu, 0x040u + i * 4u));
++	}
++	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
+ 	{
+ 		volatile uint64_t spin = 0;
+ 		while (spin < 20000000000ull) {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 47cb7e1..cfc2ba2 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -519,6 +519,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_probe(void);
+ 		polaris_gpu_smmu_probe();
+ 	}
++	{
++		extern void polaris_gpu_smmu_clocks(void);
++		polaris_gpu_smmu_clocks();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
