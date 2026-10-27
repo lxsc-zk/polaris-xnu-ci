@@ -1,0 +1,52 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 1ae4c2d..a14c055 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -413,6 +413,30 @@ polaris_scm_mp(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t *res
+ 	return (int)x0;
+ }
+ 
++
++/*
++ * msm_tz_set_cb_format(): SCM_SVC_SMMU_PROGRAM (0x15) with
++ * SMMU_CHANGE_PAGETABLE_FORMAT (0x01):
++ *   args[0] = sec_id (TZ_DEVICE_GPU == 18), args[1] = cb, args[2] = 1
++ */
++static int
++polaris_scm_set_cb_format(uint32_t cb)
++{
++	register uint64_t x0 __asm__("x0") = 0x42001501ull;
++	register uint64_t x1 __asm__("x1") = 3ull;
++	register uint64_t x2 __asm__("x2") = 18ull;
++	register uint64_t x3 __asm__("x3") = (uint64_t)cb;
++	register uint64_t x4 __asm__("x4") = 1ull;
++	register uint64_t x5 __asm__("x5") = 0ull;
++
++	__asm__ __volatile__(
++	    "smc #0"
++	    : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5)
++	    :
++	    : "memory");
++	return (int)x0;
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+@@ -459,13 +483,10 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/* Ask the secure world to program each context bank's aperture. */
++	/* Ask TZ to format each context bank before touching it. */
+ 	for (i = 0; i < 5; i++) {
+-		uint64_t res = 0;
+-		int rc = polaris_scm_mp(0xFFFF0000ull | (0ull << 8) | i,
+-		    0xFFFFFFFFull, 0xFFFFFFFFull, 0xFFFFFFFFull, &res);
+-		printf("POLARIS GPU SMMU: scm aperture cb=%u rc=%d res=0x%llx\n",
+-		    i, rc, (unsigned long long)res);
++		int rc = polaris_scm_set_cb_format(i);
++		printf("POLARIS GPU SMMU: scm cb_format cb=%u rc=%d\n", i, rc);
+ 	}
+ 
+ 	printf("POLARIS GPU SMMU: retry CB0 TTBR0 write\n");
