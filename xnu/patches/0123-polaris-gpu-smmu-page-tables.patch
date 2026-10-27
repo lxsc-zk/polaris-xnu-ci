@@ -1,0 +1,145 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 5d8b891..9707a9c 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -555,6 +555,125 @@ polaris_gpu_smmu_minimal(void)
+ 	}
+ }
+ 
++/*
++ * Stage-1 page tables for the GPU SMMU: two 4 KB tables in BSS, mapped with
++ * 2 MB blocks from GPU VA 0 to physical 0x80000000 (DRAM base).
++ */
++static uint8_t polaris_smmu_l1[4096] __attribute__((aligned(4096)));
++static uint8_t polaris_smmu_l2[4096] __attribute__((aligned(4096)));
++
++extern vm_offset_t ml_static_vtop(vm_offset_t);
++
++void
++polaris_gpu_smmu_page_tables(void)
++{
++	int optin = 0;
++	vm_offset_t base, smmu, gcc, l1, l2;
++	uint64_t pa_l1, pa_l2, *t1, *t2;
++	uint32_t v, i;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 10) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	smmu = ml_io_map(SMMU_PA, SMMU_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	if (!base || !smmu || !gcc) {
++		printf("POLARIS PT: map failed\n");
++		return;
++	}
++	/* --- same bring-up that made the CB writable --- */
++	v = pwr_read(base, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(base, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gcc, 0x71004u, pwr_read(gcc, 0x71004u) | 1u);
++	pwr_write(gcc, 0x7100cu, pwr_read(gcc, 0x7100cu) | 1u);
++	pwr_write(gcc, 0x71018u, pwr_read(gcc, 0x71018u) | 1u);
++	pwr_delay();
++	v = pwr_read(smmu, 0x48u);
++	pwr_write(smmu, 0x48u, v);
++	pwr_write(smmu, 0x68u, 0u);
++	pwr_write(smmu, 0x6cu, 0u);
++	pwr_delay();
++	v = pwr_read(smmu, 0x00u);
++	v |= 0x0020u | (1u << 1) | (1u << 2) | (1u << 4) | (1u << 5) |
++	    (1u << 11) | (1u << 12);
++	v &= ~((1u << 0) | (1u << 13));
++	v &= ~(0x3u << 14);
++	v &= ~(0x3u << 22);
++	v |= (3u << 22);
++	pwr_write(smmu, 0x00u, v);
++	pwr_delay();
++	printf("POLARIS PT: sCR0=0x%08x gcc7100c=0x%08x\n",
++	    pwr_read(smmu, 0x00u), pwr_read(gcc, 0x7100cu));
++
++	/* --- page tables --- */
++	pa_l1 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l1);
++	pa_l2 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l2);
++	printf("POLARIS PT: l1 pa=0x%llx l2 pa=0x%llx\n",
++	    (unsigned long long)pa_l1, (unsigned long long)pa_l2);
++	if ((pa_l1 & 0xfff) || (pa_l2 & 0xfff) || !pa_l1 || !pa_l2) {
++		printf("POLARIS PT: bad table alignment\n");
++		return;
++	}
++	l1 = (vm_offset_t)polaris_smmu_l1;
++	l2 = (vm_offset_t)polaris_smmu_l2;
++	t1 = (uint64_t *)l1;
++	t2 = (uint64_t *)l2;
++	for (i = 0; i < 512; i++) {
++		t1[i] = 0;
++	}
++	/* level 2: 512 x 2 MB blocks, GPU VA 0 -> DRAM 0x80000000 */
++	for (i = 0; i < 512; i++) {
++		uint64_t pa = 0x80000000ull + (uint64_t)i * 0x200000ull;
++		t2[i] = (pa & 0x0000ffffffe00000ull) |
++		    (1ull << 10) |        /* AF */
++		    (3ull << 8) |         /* inner shareable */
++		    (0ull << 2) |         /* AttrIndx 0 = normal */
++		    1ull;                 /* block descriptor */
++	}
++	t1[0] = (pa_l2 & 0x0000fffffffff000ull) | 3ull;
++	printf("POLARIS PT: l1[0]=0x%llx l2[0]=0x%llx l2[511]=0x%llx\n",
++	    (unsigned long long)t1[0], (unsigned long long)t2[0],
++	    (unsigned long long)t2[511]);
++
++	/* --- program CB0 --- */
++	pwr_write(smmu, 0x8010u, 0u);                      /* TTBCR2 */
++	*(volatile uint64_t *)(smmu + 0x8020u) = pa_l1 & ~0xfffull;  /* TTBR0 */
++	pwr_write(smmu, 0x8030u, 0x10000351Cu);            /* TCR: 36-bit, 4K */
++	pwr_write(smmu, 0x8038u, 0x000044ffu);             /* MAIR0 */
++	pwr_write(smmu, 0x803cu, 0x00000000u);             /* MAIR1 */
++	printf("POLARIS PT: CB0 TTBR0=0x%llx TCR=0x%08x MAIR0=0x%08x\n",
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u),
++	    pwr_read(smmu, 0x8030u), pwr_read(smmu, 0x8038u));
++	pwr_write(smmu, 0x8000u, 0x00c010e7u);             /* SCTLR with M */
++	pwr_delay();
++	printf("POLARIS PT: CB0 SCTLR=0x%08x (want 0xc010e7)\n",
++	    pwr_read(smmu, 0x8000u));
++	printf("POLARIS PT: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 412551c..4863541 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -527,6 +527,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_minimal(void);
+ 		polaris_gpu_smmu_minimal();
+ 	}
++	{
++		extern void polaris_gpu_smmu_page_tables(void);
++		polaris_gpu_smmu_page_tables();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
