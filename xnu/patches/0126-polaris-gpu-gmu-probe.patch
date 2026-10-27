@@ -1,5 +1,5 @@
 diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
-index f7d899f..c9c91ab 100644
+index f7d899f..8652239 100644
 --- a/bsd/dev/polaris_gpu_power.c
 +++ b/bsd/dev/polaris_gpu_power.c
 @@ -841,6 +841,53 @@ polaris_gpu_smmu_combined(void)
@@ -22,8 +22,8 @@ index f7d899f..c9c91ab 100644
 +		{ 0x501f9ccull, "general_7" },
 +		{ 0x501f985ull, "hfi_qtbl_addr" },
 +		{ 0x501b400ull, "itcm_start" },
-+		{ 0x5023b05ull, "ao_host_intr_status" },
-+		{ 0x506b400ull, "gmu_plus_1b400" },
++		{ 0x5023b05ull, "ao_intr_status" },
++		{ 0x506b400ull, "gmu_plus_itcm" },
 +	};
 +
 +	if (!polaris_touch_i2c_board()) {
