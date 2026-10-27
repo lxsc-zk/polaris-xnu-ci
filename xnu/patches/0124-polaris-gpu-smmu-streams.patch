@@ -1,0 +1,79 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 9707a9c..f3efc0e 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -674,6 +674,59 @@ polaris_gpu_smmu_page_tables(void)
+ 	}
+ }
+ 
++/*
++ * Map the GPU stream IDs onto context bank 0 so GPU traffic is translated
++ * by the stage-1 table built in polaris_gpu_smmu_page_tables().
++ * SMR(n) = 0x800 + n*4, S2CR(n) = 0xc00 + n*4.
++ *   SMR  : bit31 VALID, bits[30:16] MASK, bits[15:0] SID
++ *   S2CR : bits[7:0] CBNDX, bits[9:8] SHCFG, bits[17:16] TYPE(0=translate)
++ */
++void
++polaris_gpu_smmu_streams(void)
++{
++	int optin = 0;
++	vm_offset_t smmu;
++	uint32_t i;
++	static const uint32_t sids[] = { 0u, 1u, 2u, 4u, 5u };
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 11) {
++		return;
++	}
++	smmu = ml_io_map(SMMU_PA, SMMU_LEN);
++	if (!smmu) {
++		printf("POLARIS STR: map failed\n");
++		return;
++	}
++	printf("POLARIS STR: SCTLR=0x%08x TTBR0=0x%llx\n",
++	    pwr_read(smmu, 0x8000u),
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
++	for (i = 0; i < 5; i++) {
++		uint32_t smr = 0x800u + (i << 2);
++		uint32_t s2cr = 0xc00u + (i << 2);
++		uint32_t want_smr = (1u << 31) | (sids[i] & 0xffffu);
++		uint32_t want_s2cr = 0u | (3u << 8) | (0u << 16);
++		pwr_write(smmu, smr, want_smr);
++		pwr_write(smmu, s2cr, want_s2cr);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		pwr_delay();
++		printf("POLARIS STR: SMR[%u] 0x%08x (want 0x%08x) S2CR[%u] 0x%08x (want 0x%08x)\n",
++		    i, pwr_read(smmu, smr), want_smr,
++		    i, pwr_read(smmu, s2cr), want_s2cr);
++	}
++	printf("POLARIS STR: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 4863541..c8cbfc3 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -531,6 +531,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_page_tables(void);
+ 		polaris_gpu_smmu_page_tables();
+ 	}
++	{
++		extern void polaris_gpu_smmu_streams(void);
++		polaris_gpu_smmu_streams();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
