@@ -1,0 +1,49 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index a14c055..4863c9a 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -437,6 +437,29 @@ polaris_scm_set_cb_format(uint32_t cb)
+ 	return (int)x0;
+ }
+ 
++
++/*
++ * msm_tz_smmu_atos_start(): SCM_SVC_MP (0x0C) function 0x21 with
++ *   args[0] = sec_id, args[1] = cb, args[2] = 1 (start)
++ */
++static int
++polaris_scm_atos_start(uint32_t cb)
++{
++	register uint64_t x0 __asm__("x0") = 0x42000C21ull;
++	register uint64_t x1 __asm__("x1") = 3ull;
++	register uint64_t x2 __asm__("x2") = 18ull;
++	register uint64_t x3 __asm__("x3") = (uint64_t)cb;
++	register uint64_t x4 __asm__("x4") = 1ull;
++	register uint64_t x5 __asm__("x5") = 0ull;
++
++	__asm__ __volatile__(
++	    "smc #0"
++	    : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5)
++	    :
++	    : "memory");
++	return (int)x0;
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+@@ -483,10 +506,11 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/* Ask TZ to format each context bank before touching it. */
++	/* Vendor order: ATOS start, then set the context bank format. */
+ 	for (i = 0; i < 5; i++) {
+-		int rc = polaris_scm_set_cb_format(i);
+-		printf("POLARIS GPU SMMU: scm cb_format cb=%u rc=%d\n", i, rc);
++		int a = polaris_scm_atos_start(i);
++		int f = polaris_scm_set_cb_format(i);
++		printf("POLARIS GPU SMMU: scm cb=%u atos=%d format=%d\n", i, a, f);
+ 	}
+ 
+ 	printf("POLARIS GPU SMMU: retry CB0 TTBR0 write\n");
