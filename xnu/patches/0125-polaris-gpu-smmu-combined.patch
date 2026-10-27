@@ -1,0 +1,140 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index f3efc0e..f7d899f 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -727,6 +727,120 @@ polaris_gpu_smmu_streams(void)
+ 	}
+ }
+ 
++/* One-shot GPU SMMU bring-up used by the combined probe (polarisgpu=12). */
++void
++polaris_gpu_smmu_combined(void)
++{
++	int optin = 0;
++	vm_offset_t base, smmu, gcc, l1, l2;
++	uint64_t pa_l1, pa_l2, *t1, *t2;
++	uint32_t v, i;
++	static const uint32_t sids[] = { 0u, 1u, 2u, 4u, 5u };
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 12) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	smmu = ml_io_map(SMMU_PA, SMMU_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	if (!base || !smmu || !gcc) {
++		printf("POLARIS CMG: map failed\n");
++		return;
++	}
++	/* 1. CX power */
++	v = pwr_read(base, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(base, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	printf("POLARIS CMG: CX=0x%08x\n", pwr_read(base, GDSC_CX));
++	/* 2. GPU clocks */
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gcc, 0x71004u, pwr_read(gcc, 0x71004u) | 1u);
++	pwr_write(gcc, 0x7100cu, pwr_read(gcc, 0x7100cu) | 1u);
++	pwr_write(gcc, 0x71018u, pwr_read(gcc, 0x71018u) | 1u);
++	pwr_delay();
++	printf("POLARIS CMG: gcc7100c=0x%08x\n", pwr_read(gcc, 0x7100cu));
++	/* 3. SMMU global reset */
++	v = pwr_read(smmu, 0x48u);
++	pwr_write(smmu, 0x48u, v);
++	pwr_write(smmu, 0x68u, 0u);
++	pwr_write(smmu, 0x6cu, 0u);
++	pwr_delay();
++	v = pwr_read(smmu, 0x00u);
++	v |= (1u << 1) | (1u << 2) | (1u << 4) | (1u << 5) |
++	    (1u << 11) | (1u << 12);
++	v &= ~((1u << 0) | (1u << 13));
++	v &= ~(0x3u << 14);
++	v &= ~(0x3u << 22);
++	v |= (3u << 22);
++	pwr_write(smmu, 0x00u, v);
++	pwr_delay();
++	printf("POLARIS CMG: sCR0=0x%08x\n", pwr_read(smmu, 0x00u));
++	/* 4. page tables */
++	pa_l1 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l1);
++	pa_l2 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l2);
++	if (!pa_l1 || !pa_l2 || (pa_l1 & 0xfff) || (pa_l2 & 0xfff)) {
++		printf("POLARIS CMG: bad tables\n");
++		return;
++	}
++	l1 = (vm_offset_t)polaris_smmu_l1;
++	l2 = (vm_offset_t)polaris_smmu_l2;
++	t1 = (uint64_t *)l1;
++	t2 = (uint64_t *)l2;
++	for (i = 0; i < 512; i++) {
++		t1[i] = 0;
++	}
++	for (i = 0; i < 512; i++) {
++		uint64_t pa = 0x80000000ull + (uint64_t)i * 0x200000ull;
++		t2[i] = (pa & 0x0000ffffffe00000ull) | (1ull << 10) |
++		    (3ull << 8) | 1ull;
++	}
++	t1[0] = (pa_l2 & 0x0000fffffffff000ull) | 3ull;
++	/* 5. CB0 */
++	pwr_write(smmu, 0x8010u, 0u);
++	*(volatile uint64_t *)(smmu + 0x8020u) = pa_l1 & ~0xfffull;
++	pwr_write(smmu, 0x8030u, 0x10000351cu);
++	pwr_write(smmu, 0x8038u, 0x000044ffu);
++	pwr_write(smmu, 0x803cu, 0x00000000u);
++	pwr_write(smmu, 0x8000u, 0x00c010e7u);
++	pwr_delay();
++	printf("POLARIS CMG: TTBR0=0x%llx TCR=0x%08x SCTLR=0x%08x\n",
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u),
++	    pwr_read(smmu, 0x8030u), pwr_read(smmu, 0x8000u));
++	/* 6. streams */
++	for (i = 0; i < 5; i++) {
++		pwr_write(smmu, 0x800u + (i << 2), (1u << 31) | (sids[i] & 0xffffu));
++		pwr_write(smmu, 0xc00u + (i << 2), (3u << 8) | (0u << 16));
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	pwr_delay();
++	for (i = 0; i < 5; i++) {
++		printf("POLARIS CMG: SMR[%u]=0x%08x S2CR[%u]=0x%08x\n", i,
++		    pwr_read(smmu, 0x800u + (i << 2)), i,
++		    pwr_read(smmu, 0xc00u + (i << 2)));
++	}
++	printf("POLARIS CMG: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index c8cbfc3..410e228 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -535,6 +535,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_streams(void);
+ 		polaris_gpu_smmu_streams();
+ 	}
++	{
++		extern void polaris_gpu_smmu_combined(void);
++		polaris_gpu_smmu_combined();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
