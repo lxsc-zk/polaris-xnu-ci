@@ -1,0 +1,51 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 05c364c..f06f9de 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -432,24 +432,31 @@ polaris_gpu_smmu_clocks(void)
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+ 	/*
+-	 * tz/hyp name a dedicated "gpucc_gpu_smmu_clk". If that clock is gated
+-	 * the context-bank writes are dropped, so enable every GPUCC branch and
+-	 * then retry the context bank 0 write.
++	 * The GPU SMMU AHB port is clocked from GCC: gcc_gpu_gpll0_clk_src
++	 * (0x52004 bit15) and gcc_gpu_gpll0_div_clk_src (bit16) gate
++	 * gcc_gpu_memnoc_gfx_clk / gcc_gpu_snoc_dvm_gfx_clk. Without the
++	 * parent gates those branches stay halted, so program them first.
+ 	 */
+ 	{
+-		static const uint32_t br[] = {
+-			0x1004u, 0x1054u, 0x1058u, 0x1064u, 0x107cu, 0x1088u,
+-			0x108cu, 0x1098u, 0x109cu, 0x10a4u, 0x10a8u, 0x1164u,
+-			0x1168u,
+-		};
+-		vm_offset_t gpucc = ml_io_map(GPUCC_PA, GPUCC_LEN);
+-		printf("POLARIS GPU SMMU: enabling all GPUCC branches\n");
+-		for (i = 0; i < sizeof(br) / sizeof(br[0]); i++) {
+-			uint32_t before = pwr_read(gpucc, br[i]);
+-			pwr_write(gpucc, br[i], before | 1u);
++		vm_offset_t gcc = ml_io_map(GCC_PA, GCC_LEN);
++		uint32_t v;
++		if (gcc) {
++			v = pwr_read(gcc, 0x52004u);
++			printf("POLARIS GPU SMMU: gcc 0x52004=0x%08x\n", v);
++			pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
+ 			pwr_delay();
+-			printf("POLARIS GPU SMMU: clk 0x%04x 0x%08x -> 0x%08x\n",
+-			    br[i], before, pwr_read(gpucc, br[i]));
++			printf("POLARIS GPU SMMU: gcc 0x52004=0x%08x (gpll0 gates on)\n",
++			    pwr_read(gcc, 0x52004u));
++			{
++				static const uint32_t g[] = { 0x44038u, 0x7100cu, 0x71018u, 0x71004u, 0x8c010u };
++				for (i = 0; i < sizeof(g) / sizeof(g[0]); i++) {
++					uint32_t b = pwr_read(gcc, g[i]);
++					pwr_write(gcc, g[i], b | 1u);
++					pwr_delay();
++					printf("POLARIS GPU SMMU: gcc 0x%05x 0x%08x -> 0x%08x\n",
++					    g[i], b, pwr_read(gcc, g[i]));
++				}
++			}
+ 		}
+ 	}
+ 
