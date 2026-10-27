@@ -1,0 +1,131 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 990d7ac..593f6d8 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -460,6 +460,111 @@ polaris_scm_atos_start(uint32_t cb)
+ 	return (int)x0;
+ }
+ 
++/*
++ * Replay what arm_smmu_device_reset() does: clear the global fault status,
++ * invalidate TLBs, program sCR0, then touch a context bank. Gated on
++ * polarisgpu=9 so it only runs when asked.
++ */
++void
++polaris_gpu_smmu_minimal(void)
++{
++\tint optin = 0;
++\tvm_offset_t base, smmu, gcc;
++\tuint32_t v, i;
++
++\tif (!polaris_touch_i2c_board()) {
++\t\treturn;
++\t}
++\t(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++\tif (optin != 9) {
++\t\treturn;
++\t}
++\tbase = ml_io_map(GPUCC_PA, GPUCC_LEN);
++\tsmmu = ml_io_map(SMMU_PA, SMMU_LEN);
++\tgcc = ml_io_map(GCC_PA, GCC_LEN);
++\tif (!base || !smmu || !gcc) {
++\t\tprintf("POLARIS RST: map failed\\n");
++\t\treturn;
++\t}
++\tv = pwr_read(base, GDSC_CX);
++\tif (!(v & (1u << 31))) {
++\t\tpwr_write(base, GDSC_CX, v & ~1u);
++\t\tfor (i = 0; i < 2000; i++) {
++\t\t\tv = pwr_read(base, GDSC_CX);
++\t\t\tif (v & (1u << 31)) {
++\t\t\t\tbreak;
++\t\t\t}
++\t\t}
++\t}
++\tprintf("POLARIS RST: CX=0x%08x\\n", pwr_read(base, GDSC_CX));
++
++\t/* GPU clock tree: parents first, then the branches the SMMU needs */
++\tv = pwr_read(gcc, 0x52004u);
++\tpwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++\tpwr_delay();
++\t{
++\t\tstatic const uint32_t g[] = { 0x71004u, 0x7100cu, 0x71018u };
++\t\tfor (i = 0; i < sizeof(g) / sizeof(g[0]); i++) {
++\t\t\tuint32_t b = pwr_read(gcc, g[i]);
++\t\t\tpwr_write(gcc, g[i], b | 1u);
++\t\t\tpwr_delay();
++\t\t\tprintf("POLARIS RST: gcc 0x%05x 0x%08x -> 0x%08x\\n",
++\t\t\t    g[i], b, pwr_read(gcc, g[i]));
++\t\t}
++\t}
++
++\t/* arm_smmu_device_reset() */
++\tprintf("POLARIS RST: reading sGFSR\\n");
++\tv = pwr_read(smmu, 0x48u);
++\tprintf("POLARIS RST: sGFSR=0x%08x\\n", v);
++\tpwr_write(smmu, 0x48u, v);
++\tpwr_delay();
++\tprintf("POLARIS RST: TLBIALLNSNH\\n");
++\tpwr_write(smmu, 0x68u, 0u);
++\tprintf("POLARIS RST: TLBIALLH\\n");
++\tpwr_write(smmu, 0x6cu, 0u);
++\tpwr_delay();
++\tv = pwr_read(smmu, 0x00u);
++\tprintf("POLARIS RST: sCR0 before=0x%08x\\n", v);
++\tv |= (1u << 1) | (1u << 2) | (1u << 4) | (1u << 5);
++\tv |= (1u << 11) | (1u << 12);
++\tv &= ~(1u << 0);
++\tv &= ~(1u << 13);
++\tv &= ~(0x3u << 14);
++\tv &= ~(0x3u << 22);
++\tv |= (3u << 22);
++\tpwr_write(smmu, 0x00u, v);
++\tpwr_delay();
++\tprintf("POLARIS RST: sCR0 after =0x%08x (wrote 0x%08x)\\n",
++\t    pwr_read(smmu, 0x00u), v);
++
++\tprintf("POLARIS RST: sACR=0x%08x\\n", pwr_read(smmu, 0x10u));
++
++\tprintf("POLARIS RST: CB0 SCTLR write 0\\n");
++\tpwr_write(smmu, 0x8000u, 0u);
++\tpwr_delay();
++\tprintf("POLARIS RST: CB0 SCTLR=0x%08x\\n", pwr_read(smmu, 0x8000u));
++\tprintf("POLARIS RST: CB0 TTBR0 write\\n");
++\t*(volatile uint64_t *)(smmu + 0x8020u) = 0x0000deadb000ull;
++\tpwr_delay();
++\tprintf("POLARIS RST: CB0 TTBR0=0x%llx (want 0xdeadb000)\\n",
++\t    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
++\tprintf("POLARIS RST: CB0 S1_MAIR0 write\\n");
++\tpwr_write(smmu, 0x8038u, 0xff4400u);
++\tpwr_delay();
++\tprintf("POLARIS RST: CB0 S1_MAIR0=0x%08x (want 0xff4400)\\n",
++\t    pwr_read(smmu, 0x8038u));
++\t*(volatile uint64_t *)(smmu + 0x8020u) = 0ull;
++\tprintf("POLARIS RST: done\\n");
++\t{
++\t\tvolatile uint64_t spin = 0;
++\t\twhile (spin < 20000000000ull) {
++\t\t\tspin++;
++\t\t\t__asm__ __volatile__("nop");
++\t\t}
++\t}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index cfc2ba2..412551c 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -523,6 +523,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_clocks(void);
+ 		polaris_gpu_smmu_clocks();
+ 	}
++	{
++		extern void polaris_gpu_smmu_minimal(void);
++		polaris_gpu_smmu_minimal();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
