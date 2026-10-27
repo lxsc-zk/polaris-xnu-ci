@@ -1,0 +1,39 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 4863c9a..990d7ac 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -506,19 +506,23 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/* Vendor order: ATOS start, then set the context bank format. */
+-	for (i = 0; i < 5; i++) {
+-		int a = polaris_scm_atos_start(i);
+-		int f = polaris_scm_set_cb_format(i);
+-		printf("POLARIS GPU SMMU: scm cb=%u atos=%d format=%d\n", i, a, f);
+-	}
++	printf("POLARIS GPU SMMU: read sACR region\n");
++	printf("POLARIS GPU SMMU: 0x10=0x%08x\n", pwr_read(smmu, 0x10u));
++	printf("POLARIS GPU SMMU: 0x14=0x%08x\n", pwr_read(smmu, 0x14u));
++	printf("POLARIS GPU SMMU: 0x18=0x%08x\n", pwr_read(smmu, 0x18u));
++	printf("POLARIS GPU SMMU: 0x1c=0x%08x\n", pwr_read(smmu, 0x1cu));
++
++	printf("POLARIS GPU SMMU: sCR0 write test\n");
++	pwr_write(smmu, 0x00u, 0x00200626u | 0x8000u);
++	pwr_delay();
++	printf("POLARIS GPU SMMU: sCR0=0x%08x (want bit15 set)\n",
++	    pwr_read(smmu, 0x00u));
+ 
+-	printf("POLARIS GPU SMMU: retry CB0 TTBR0 write\n");
+-	*(volatile uint64_t *)(smmu + 0x8020u) = 0x0000deadb000ull;
++	printf("POLARIS GPU SMMU: impl write test again\n");
++	pwr_write(smmu, 0x6060u, 0x00001055u);
+ 	pwr_delay();
+-	printf("POLARIS GPU SMMU: CB0 TTBR0=0x%llx (want 0xdeadb000)\n",
+-	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
+-	*(volatile uint64_t *)(smmu + 0x8020u) = 0ull;
++	printf("POLARIS GPU SMMU: 0x6060=0x%08x (want 0x1055)\n",
++	    pwr_read(smmu, 0x6060u));
+ 	printf("POLARIS GPU SMMU: CB base test done\n");
+ 	printf("POLARIS GPU SMMU: clocks on, ID read done\n");
+ 	{
