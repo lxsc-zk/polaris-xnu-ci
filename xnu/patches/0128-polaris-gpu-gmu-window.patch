@@ -1,0 +1,100 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 2396201..dd99065 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -895,6 +895,80 @@ polaris_gpu_gmu_regscan(void)
+ 	}
+ }
+ 
++/*
++ * GMU register window check: power CX, enable the GCC GPU clocks, then read
++ * the A6xx GMU registers relative to 0x506a000 (ITCM 0x1b400, SYSRESET
++ * 0x1f800, BOOT_CONFIG 0x1f801, FW_INIT 0x1f81c, GENERAL_7 0x1f9cc,
++ * AO interrupt status 0x23b05).
++ */
++void
++polaris_gpu_gmu_window(void)
++{
++	int optin = 0;
++	vm_offset_t base, gcc, map;
++	uint32_t v, i;
++	static const struct { uint32_t off; const char *name; } regs[] = {
++		{ 0x00000u, "csr_0x00000" },
++		{ 0x1b400u, "itcm_start" },
++		{ 0x1f800u, "sysreset" },
++		{ 0x1f801u, "boot_config" },
++		{ 0x1f81cu, "fw_init_result" },
++		{ 0x1f9ccu, "general_7" },
++		{ 0x1f985u, "hfi_qtbl_addr" },
++		{ 0x23b05u, "ao_intr_status" },
++	};
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 14) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	if (!base || !gcc) {
++		printf("POLARIS GW: map failed\n");
++		return;
++	}
++	v = pwr_read(base, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(base, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	printf("POLARIS GW: CX=0x%08x\n", pwr_read(base, GDSC_CX));
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gcc, 0x71004u, pwr_read(gcc, 0x71004u) | 1u);
++	pwr_write(gcc, 0x7100cu, pwr_read(gcc, 0x7100cu) | 1u);
++	pwr_write(gcc, 0x71018u, pwr_read(gcc, 0x71018u) | 1u);
++	pwr_delay();
++	printf("POLARIS GW: gcc7100c=0x%08x\n", pwr_read(gcc, 0x7100cu));
++	map = ml_io_map(0x506a000ull, 0x24000);
++	if (!map) {
++		printf("POLARIS GW: gmu window map failed\n");
++		return;
++	}
++	for (i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
++		printf("POLARIS GW: %s (0x506a000+0x%05x) = 0x%08x\n",
++		    regs[i].name, regs[i].off, pwr_read(map, regs[i].off));
++	}
++	printf("POLARIS GW: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index bda91d1..54a5ebf 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -539,6 +539,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_combined(void);
+ 		polaris_gpu_smmu_combined();
+ 	}
++	{
++		extern void polaris_gpu_gmu_window(void);
++		polaris_gpu_gmu_window();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_regscan(void);
+ 		polaris_gpu_gmu_regscan();
