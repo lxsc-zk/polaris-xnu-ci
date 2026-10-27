@@ -1,0 +1,114 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index e45279d..e4d9802 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -1552,6 +1552,94 @@ polaris_gpu_gmu_rsc(void)
+ 	}
+ }
+ 
++/*
++ * Try the GDSC handshake the other way around: start the GX side clocks
++ * (gpu_cc_gx_gfx3d_clk_src RCG at 0x101c, branch at 0x1054) before polling
++ * the GX power domain.
++ */
++void
++polaris_gpu_gx_clocks(void)
++{
++	int optin = 0;
++	vm_offset_t base, gcc, gmu;
++	uint32_t v, i, rcg, br;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 22) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	gmu = ml_io_map(0x506a000ull, 0x30000);
++	if (!base || !gcc || !gmu) {
++		printf("POLARIS GXC: map failed\n");
++		return;
++	}
++	v = pwr_read(base, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(base, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	printf("POLARIS GXC: CX=0x%08x GX=0x%08x\n",
++	    pwr_read(base, GDSC_CX), pwr_read(base, GDSC_GX));
++	/* GX graphics RCG: CMD at 0x101c, CFG at 0x1020 */
++	rcg = pwr_read(base, 0x101cu);
++	printf("POLARIS GXC: rcg101c=0x%08x cfg1020=0x%08x\n",
++	    rcg, pwr_read(base, 0x1020u));
++	pwr_write(base, 0x101cu, rcg | 0x3u);
++	pwr_delay();
++	br = pwr_read(base, 0x1054u);
++	pwr_write(base, 0x1054u, br | 1u);
++	pwr_delay();
++	printf("POLARIS GXC: branch1054 0x%08x -> 0x%08x (halt bit31)\n",
++	    br, pwr_read(base, 0x1054u));
++	/* also the gx gmu branch if present nearby */
++	br = pwr_read(base, 0x1058u);
++	pwr_write(base, 0x1058u, br | 1u);
++	pwr_delay();
++	printf("POLARIS GXC: branch1058 0x%08x -> 0x%08x\n",
++	    br, pwr_read(base, 0x1058u));
++	/* now try GX once more */
++	v = pwr_read(base, GDSC_GX);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_GX, v & ~1u);
++		for (i = 0; i < 5000; i++) {
++			v = pwr_read(base, GDSC_GX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	printf("POLARIS GXC: GX=0x%08x after %u polls %s\n",
++	    pwr_read(base, GDSC_GX), i,
++	    (pwr_read(base, GDSC_GX) & (1u << 31)) ? "ON" : "OFF");
++	pwr_write(gmu, 0x1f9ccu, 0xdeadbeefu);
++	pwr_delay();
++	v = pwr_read(gmu, 0x1f9ccu);
++	printf("POLARIS GXC: general7=0x%08x %s\n", v,
++	    (v == 0xdeadbeefu) ? "OK" : "FAIL");
++	pwr_write(gmu, 0x1f9ccu, 0u);
++	printf("POLARIS GXC: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index d36c9b9..8db80d2 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -567,6 +567,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_gmu_rsc(void);
+ 		polaris_gpu_gmu_rsc();
+ 	}
++	{
++		extern void polaris_gpu_gx_clocks(void);
++		polaris_gpu_gx_clocks();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_window(void);
+ 		polaris_gpu_gmu_window();
