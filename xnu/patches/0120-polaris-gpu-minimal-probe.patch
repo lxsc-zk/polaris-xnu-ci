@@ -1,0 +1,85 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 990d7ac..4e64e74 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -460,6 +460,65 @@ polaris_scm_atos_start(uint32_t cb)
+ 	return (int)x0;
+ }
+ 
++/*
++ * Minimal probe: bring CX up and immediately write a context bank, with none
++ * of the clock/SCM pokes that the other probes perform beforehand.
++ */
++void
++polaris_gpu_smmu_minimal(void)
++{
++	int optin = 0;
++	vm_offset_t base, smmu;
++	uint32_t v, i;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 8) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	smmu = ml_io_map(SMMU_PA, SMMU_LEN);
++	if (!base || !smmu) {
++		printf("POLARIS GPU MIN: map failed\n");
++		return;
++	}
++	v = pwr_read(base, GDSC_CX);
++	printf("POLARIS GPU MIN: CX before=0x%08x\n", v);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(base, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	printf("POLARIS GPU MIN: CX after=0x%08x\n", pwr_read(base, GDSC_CX));
++	printf("POLARIS GPU MIN: sCR0=0x%08x ID0=0x%08x\n",
++	    pwr_read(smmu, 0x00u), pwr_read(smmu, 0x20u));
++	printf("POLARIS GPU MIN: CB0 SCTLR before=0x%08x\n", pwr_read(smmu, 0x8000u));
++	pwr_write(smmu, 0x8000u, 0x00000002u);
++	pwr_delay();
++	printf("POLARIS GPU MIN: CB0 SCTLR after =0x%08x (want 2)\n",
++	    pwr_read(smmu, 0x8000u));
++	pwr_write(smmu, 0x8000u, 0x00000000u);
++	*(volatile uint64_t *)(smmu + 0x8020u) = 0x0000deadb000ull;
++	pwr_delay();
++	printf("POLARIS GPU MIN: CB0 TTBR0=0x%llx (want 0xdeadb000)\n",
++	    (unsigned long long)*(volatile uint64_t *)(smmu + 0x8020u));
++	*(volatile uint64_t *)(smmu + 0x8020u) = 0ull;
++	printf("POLARIS GPU MIN: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index cfc2ba2..412551c 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -523,6 +523,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_clocks(void);
+ 		polaris_gpu_smmu_clocks();
+ 	}
++	{
++		extern void polaris_gpu_smmu_minimal(void);
++		polaris_gpu_smmu_minimal();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
