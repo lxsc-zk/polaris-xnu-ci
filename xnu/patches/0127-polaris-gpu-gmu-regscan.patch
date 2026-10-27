@@ -1,0 +1,80 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index f7d899f..2396201 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -841,6 +841,60 @@ polaris_gpu_smmu_combined(void)
+ 	}
+ }
+ 
++/*
++ * Scan candidate GMU register block addresses. The A6xx offsets from
++ * a6xx_reg.h (ITCM 0x1b400, SYSRESET 0x1f800, AO interrupts 0x23b04) are
++ * larger than the 64 KiB "gmu_core" window in the device tree, so the real
++ * base has to be found empirically.
++ */
++void
++polaris_gpu_gmu_regscan(void)
++{
++	int optin = 0;
++	vm_offset_t map;
++	uint32_t i;
++	static const struct { uint64_t pa; const char *name; } regs[] = {
++		{ 0x506a000ull, "dt_gmu_core_0" },
++		{ 0x501f800ull, "gpu+1f800_sysreset" },
++		{ 0x501f81cull, "gpu+1f81c_fwinit" },
++		{ 0x501f9ccull, "gpu+1f9cc_gen7" },
++		{ 0x501b400ull, "gpu+1b400_itcm" },
++		{ 0x5023b05ull, "gpu+23b05_ao_intr" },
++		{ 0x506b400ull, "gmu+1b400" },
++		{ 0x506f800ull, "gmu+1f800" },
++		{ 0x5073b04ull, "gmu+23b04" },
++		{ 0x50a0000ull, "gmu_alt_0xa0000" },
++	};
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 13) {
++		return;
++	}
++	printf("POLARIS GMU: start scan\n");
++	for (i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
++		printf("POLARIS GMU: reading %s\n", regs[i].name);
++		map = ml_io_map((vm_offset_t)(regs[i].pa & ~0xfffull), 0x1000);
++		if (!map) {
++			printf("POLARIS GMU: %s map failed\n", regs[i].name);
++			continue;
++		}
++		printf("POLARIS GMU: %s @0x%llx = 0x%08x\n", regs[i].name,
++		    (unsigned long long)regs[i].pa,
++		    pwr_read(map, (uint32_t)(regs[i].pa & 0xfffull)));
++	}
++	printf("POLARIS GMU: scan done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 410e228..bda91d1 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -539,6 +539,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_smmu_combined(void);
+ 		polaris_gpu_smmu_combined();
+ 	}
++	{
++		extern void polaris_gpu_gmu_regscan(void);
++		polaris_gpu_gmu_regscan();
++	}
+ 
+ #define DEBUG_BSDINIT 0
+ 
