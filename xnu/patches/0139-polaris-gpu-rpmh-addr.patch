@@ -1,0 +1,44 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index f006df7..486669a 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -1730,8 +1730,9 @@ polaris_gpu_gx_root(void)
+ /* RPMh client: cmd_db at 0x85fe0000, apps RSC DRV0 at 0x179c0000. */
+ #define RPMH_CMD_DB_PA		0x85fe0000ull
+ #define RPMH_CMD_DB_LEN		0x20000u
+-#define RPMH_RSC_DRV0_PA	0x179c0000ull
+-#define RPMH_RSC_LEN		0x10000u
++#define RPMH_RSC_DRV0_PA	0x179e0000ull
++#define RPMH_RSC_LEN		0x4000u
++#define RPMH_TCS_BASE_OFF	0xd00u
+ #define RPMH_TCS_STRIDE		0x2a0u
+ #define RPMH_CMD_STRIDE		0x14u
+ #define RPMH_IRQ_STATUS		0x04u
+@@ -1814,7 +1815,7 @@ rpmh_write_level(vm_offset_t rsc, uint32_t addr, uint32_t level,
+ 	uint32_t v, i;
+ 	int ok = 0;
+ 
+-	base = 0;
++	base = RPMH_TCS_BASE_OFF;
+ 	pwr_write(rsc, base + RPMH_CMD_MSGID, RPMH_MSGID_WRITE | (1u << 8));
+ 	pwr_write(rsc, base + RPMH_CMD_ADDR, addr);
+ 	pwr_write(rsc, base + RPMH_CMD_DATA, level);
+@@ -1849,7 +1850,7 @@ polaris_gpu_rpmh(void)
+ 		return;
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+-	if (optin != 24) {
++	if (optin != 24 && optin != 25) {
+ 		return;
+ 	}
+ 	db = ml_io_map(RPMH_CMD_DB_PA, RPMH_CMD_DB_LEN);
+@@ -1887,6 +1888,9 @@ polaris_gpu_rpmh(void)
+ 	}
+ 	printf("POLARIS RPMH: rsc control=0x%08x status=0x%08x irq=0x%08x\n",
+ 	    pwr_read(rsc, 0x14u), pwr_read(rsc, 0x18u), pwr_read(rsc, 0x04u));
++	printf("POLARIS RPMH: tcs0 cmd_enable=0x%08x status=0x%08x\n",
++	    pwr_read(rsc, RPMH_TCS_BASE_OFF + 0x1cu),
++	    pwr_read(rsc, RPMH_TCS_BASE_OFF + 0x18u));
+ 	/* CX / MX first, then the GPU rail */
+ 	if (mx.addr && mx.levels) {
+ 		rpmh_write_level(rsc, mx.addr, mx.levels - 1, "mx.lvl");
