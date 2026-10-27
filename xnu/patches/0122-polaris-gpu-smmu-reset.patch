@@ -1,8 +1,16 @@
 diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
-index 733c404..77c013e 100644
+index 4e64e74..5d8b891 100644
 --- a/bsd/dev/polaris_gpu_power.c
 +++ b/bsd/dev/polaris_gpu_power.c
-@@ -476,18 +476,17 @@ polaris_gpu_smmu_minimal(void)
+@@ -468,24 +468,24 @@ void
+ polaris_gpu_smmu_minimal(void)
+ {
+ 	int optin = 0;
+-	vm_offset_t base, smmu;
++	vm_offset_t base, smmu, gcc;
+ 	uint32_t v, i;
+ 
+ 	if (!polaris_touch_i2c_board()) {
  		return;
  	}
  	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
@@ -12,9 +20,10 @@ index 733c404..77c013e 100644
  	}
  	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
  	smmu = ml_io_map(SMMU_PA, SMMU_LEN);
- 	gcc = ml_io_map(GCC_PA, GCC_LEN);
- 	if (!base || !smmu || !gcc) {
+-	if (!base || !smmu) {
 -		printf("POLARIS GPU MIN: map failed\n");
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	if (!base || !smmu || !gcc) {
 +		printf("POLARIS RST: map failed\n");
  		return;
  	}
@@ -23,47 +32,37 @@ index 733c404..77c013e 100644
  	if (!(v & (1u << 31))) {
  		pwr_write(base, GDSC_CX, v & ~1u);
  		for (i = 0; i < 2000; i++) {
-@@ -497,41 +496,60 @@ polaris_gpu_smmu_minimal(void)
+@@ -495,21 +495,57 @@ polaris_gpu_smmu_minimal(void)
  			}
  		}
  	}
 -	printf("POLARIS GPU MIN: CX after=0x%08x\n", pwr_read(base, GDSC_CX));
-+	printf("POLARIS RST: CX=0x%08x\n", pwr_read(base, GDSC_CX));
- 
--	/* parent GPLL0 gates */
- 	v = pwr_read(gcc, 0x52004u);
- 	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
- 	pwr_delay();
--	printf("POLARIS GPU MIN: gcc 0x52004 0x%08x -> 0x%08x\n", v,
--	    pwr_read(gcc, 0x52004u));
--	/* iface / memnoc / snoc branches */
- 	{
--		static const uint32_t g[] = { 0x71004u, 0x7100cu, 0x71018u, 0x44038u };
-+		static const uint32_t g[] = { 0x71004u, 0x7100cu, 0x71018u };
- 		for (i = 0; i < sizeof(g) / sizeof(g[0]); i++) {
- 			uint32_t b = pwr_read(gcc, g[i]);
- 			pwr_write(gcc, g[i], b | 1u);
- 			pwr_delay();
--			printf("POLARIS GPU MIN: gcc 0x%05x 0x%08x -> 0x%08x\n",
-+			printf("POLARIS RST: gcc 0x%05x 0x%08x -> 0x%08x\n",
- 			    g[i], b, pwr_read(gcc, g[i]));
- 		}
- 	}
 -	printf("POLARIS GPU MIN: sCR0=0x%08x ID0=0x%08x\n",
 -	    pwr_read(smmu, 0x00u), pwr_read(smmu, 0x20u));
--	printf("POLARIS GPU MIN: reading CB0 SCTLR ...\n");
--	v = pwr_read(smmu, 0x8000u);
--	printf("POLARIS GPU MIN: CB0 SCTLR before=0x%08x\n", v);
+-	printf("POLARIS GPU MIN: CB0 SCTLR before=0x%08x\n", pwr_read(smmu, 0x8000u));
 -	pwr_write(smmu, 0x8000u, 0x00000002u);
-+
-+	printf("POLARIS RST: reading sGFSR\n");
-+	v = pwr_read(smmu, 0x48u);
-+	printf("POLARIS RST: sGFSR=0x%08x\n", v);
-+	pwr_write(smmu, 0x48u, v);
++	printf("POLARIS RST: CX=0x%08x\n", pwr_read(base, GDSC_CX));
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
  	pwr_delay();
 -	printf("POLARIS GPU MIN: CB0 SCTLR after =0x%08x (want 2)\n",
 -	    pwr_read(smmu, 0x8000u));
 -	pwr_write(smmu, 0x8000u, 0x00000000u);
++	{
++		static const uint32_t g[] = { 0x71004u, 0x7100cu, 0x71018u };
++		for (i = 0; i < sizeof(g) / sizeof(g[0]); i++) {
++			uint32_t b = pwr_read(gcc, g[i]);
++			pwr_write(gcc, g[i], b | 1u);
++			pwr_delay();
++			printf("POLARIS RST: gcc 0x%05x 0x%08x -> 0x%08x\n",
++			    g[i], b, pwr_read(gcc, g[i]));
++		}
++	}
++	printf("POLARIS RST: reading sGFSR\n");
++	v = pwr_read(smmu, 0x48u);
++	printf("POLARIS RST: sGFSR=0x%08x\n", v);
++	pwr_write(smmu, 0x48u, v);
++	pwr_delay();
 +	printf("POLARIS RST: TLBIALLNSNH\n");
 +	pwr_write(smmu, 0x68u, 0u);
 +	printf("POLARIS RST: TLBIALLH\n");
@@ -82,7 +81,6 @@ index 733c404..77c013e 100644
 +	pwr_delay();
 +	printf("POLARIS RST: sCR0 after =0x%08x (wrote 0x%08x)\n",
 +	    pwr_read(smmu, 0x00u), v);
-+
 +	printf("POLARIS RST: sACR=0x%08x\n", pwr_read(smmu, 0x10u));
 +	pwr_write(smmu, 0x8000u, 0u);
 +	pwr_delay();
