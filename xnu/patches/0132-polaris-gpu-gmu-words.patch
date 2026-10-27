@@ -1,0 +1,104 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index d8872b5..27b3ad2 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -1210,6 +1210,84 @@ polaris_gpu_gmu_bytes(void)
+ 	}
+ }
+ 
++/*
++ * The GMU register block only accepts 32-bit aligned accesses: an 8-bit
++ * access to 0x1f801 raises a synchronous external abort. Read 32-bit words
++ * and extract the byte fields by shifting.
++ */
++void
++polaris_gpu_gmu_words(void)
++{
++	int optin = 0;
++	vm_offset_t base, gcc, gmu;
++	uint32_t v, w, i;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 18) {
++		return;
++	}
++	base = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	gmu = ml_io_map(0x506a000ull, 0x30000);
++	if (!base || !gcc || !gmu) {
++		printf("POLARIS GWD: map failed\n");
++		return;
++	}
++	v = pwr_read(base, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(base, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(base, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(base, 0x1120u, 0x00000003u);
++	pwr_delay();
++	pwr_write(base, 0x1124u, 0x00000601u);
++	pwr_delay();
++	v = pwr_read(base, 0x1098u);
++	v |= (0xfu << 8) | (0xfu << 4);
++	v &= ~(1u << 31);
++	v |= 1u;
++	pwr_write(base, 0x1098u, v);
++	pwr_delay();
++	printf("POLARIS GWD: CX=0x%08x cbcr=0x%08x\n",
++	    pwr_read(base, GDSC_CX), pwr_read(base, 0x1098u));
++	w = pwr_read(gmu, 0x1f800u);
++	printf("POLARIS GWD: word1f800=0x%08x sysreset=0x%02x bootcfg=0x%02x\n",
++	    w, w & 0xffu, (w >> 8) & 0xffu);
++	printf("POLARIS GWD: word1f81c=0x%08x (fw init result)\n",
++	    pwr_read(gmu, 0x1f81cu));
++	w = pwr_read(gmu, 0x1f984u);
++	printf("POLARIS GWD: word1f984=0x%08x qtbl_info=0x%02x qtbl_addr=0x%02x\n",
++	    w, w & 0xffu, (w >> 8) & 0xffu);
++	printf("POLARIS GWD: word1f980=0x%08x (sfr addr area)\n",
++	    pwr_read(gmu, 0x1f980u));
++	printf("POLARIS GWD: word1f9cc=0x%08x (general_7)\n",
++	    pwr_read(gmu, 0x1f9ccu));
++	printf("POLARIS GWD: word23b04=0x%08x (ao intr clr/status/mask)\n",
++	    pwr_read(gmu, 0x23b04u));
++	printf("POLARIS GWD: word1b400=0x%08x (itcm first word)\n",
++	    pwr_read(gmu, 0x1b400u));
++	printf("POLARIS GWD: word00000=0x%08x\n", pwr_read(gmu, 0x0u));
++	printf("POLARIS GWD: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index b8cb3f1..dac4fdd 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -551,6 +551,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_gmu_bytes(void);
+ 		polaris_gpu_gmu_bytes();
+ 	}
++	{
++		extern void polaris_gpu_gmu_words(void);
++		polaris_gpu_gmu_words();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_window(void);
+ 		polaris_gpu_gmu_window();
