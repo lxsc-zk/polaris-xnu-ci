@@ -1,0 +1,80 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index f06f9de..1ae4c2d 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -385,6 +385,34 @@ polaris_gpu_smmu_probe(void)
+ #define GCC_PA   0x100000ull
+ #define GCC_LEN  0x100000ull
+ 
++
++/*
++ * Vendor kgsl programs each SMMU context bank's aperture through the secure
++ * world: scm_call2(SCM_SIP_FNID(SCM_SVC_MP, 0x1B), desc) with
++ *   args[0] = 0xFFFF0000 | (aperture_reg << 8) | cb, args[1..3] = ~0
++ * Replicate that call from XNU, then write the CB register again.
++ */
++static int
++polaris_scm_mp(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t *res)
++{
++	register uint64_t x0 __asm__("x0") = 0x42000C1Bull;
++	register uint64_t x1 __asm__("x1") = 4ull;
++	register uint64_t x2 __asm__("x2") = a0;
++	register uint64_t x3 __asm__("x3") = a1;
++	register uint64_t x4 __asm__("x4") = a2;
++	register uint64_t x5 __asm__("x5") = a3;
++
++	__asm__ __volatile__(
++	    "smc #0"
++	    : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5)
++	    :
++	    : "memory");
++	if (res) {
++		*res = x0;
++	}
++	return (int)x0;
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+@@ -431,33 +459,13 @@ polaris_gpu_smmu_clocks(void)
+ 	printf("POLARIS GPU SMMU: CB0@0x8000 SCTLR=0x%08x\n",
+ 	    pwr_read(smmu, 0x8000u));
+ 	printf("POLARIS GPU SMMU: impl@0x6000=0x%08x\n", pwr_read(smmu, 0x6000u));
+-	/*
+-	 * The GPU SMMU AHB port is clocked from GCC: gcc_gpu_gpll0_clk_src
+-	 * (0x52004 bit15) and gcc_gpu_gpll0_div_clk_src (bit16) gate
+-	 * gcc_gpu_memnoc_gfx_clk / gcc_gpu_snoc_dvm_gfx_clk. Without the
+-	 * parent gates those branches stay halted, so program them first.
+-	 */
+-	{
+-		vm_offset_t gcc = ml_io_map(GCC_PA, GCC_LEN);
+-		uint32_t v;
+-		if (gcc) {
+-			v = pwr_read(gcc, 0x52004u);
+-			printf("POLARIS GPU SMMU: gcc 0x52004=0x%08x\n", v);
+-			pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
+-			pwr_delay();
+-			printf("POLARIS GPU SMMU: gcc 0x52004=0x%08x (gpll0 gates on)\n",
+-			    pwr_read(gcc, 0x52004u));
+-			{
+-				static const uint32_t g[] = { 0x44038u, 0x7100cu, 0x71018u, 0x71004u, 0x8c010u };
+-				for (i = 0; i < sizeof(g) / sizeof(g[0]); i++) {
+-					uint32_t b = pwr_read(gcc, g[i]);
+-					pwr_write(gcc, g[i], b | 1u);
+-					pwr_delay();
+-					printf("POLARIS GPU SMMU: gcc 0x%05x 0x%08x -> 0x%08x\n",
+-					    g[i], b, pwr_read(gcc, g[i]));
+-				}
+-			}
+-		}
++	/* Ask the secure world to program each context bank's aperture. */
++	for (i = 0; i < 5; i++) {
++		uint64_t res = 0;
++		int rc = polaris_scm_mp(0xFFFF0000ull | (0ull << 8) | i,
++		    0xFFFFFFFFull, 0xFFFFFFFFull, 0xFFFFFFFFull, &res);
++		printf("POLARIS GPU SMMU: scm aperture cb=%u rc=%d res=0x%llx\n",
++		    i, rc, (unsigned long long)res);
+ 	}
+ 
+ 	printf("POLARIS GPU SMMU: retry CB0 TTBR0 write\n");
