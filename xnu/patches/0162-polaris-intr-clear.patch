@@ -1,0 +1,48 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index bc6902e..c8f70a3 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -223,13 +223,14 @@ polaris_gfx_rail_on(vm_offset_t gmu, uint32_t gx_idx, uint32_t mx_idx)
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	*(volatile uint32_t *)(gmu + 0x14650u) = (1u << 22);	/* HOST2GMU_INTR_SET */
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+-	for (i = 0; i < 100000u; i++) {
++	for (i = 0; i < 5000000u; i++) {
+ 		info = *(volatile uint32_t *)(gmu + 0x14648u);
+ 		if (info & (1u << 30)) {
+ 			break;
+ 		}
+ 		__asm__ __volatile__("nop");
+ 	}
++	(void)i;
+ 	*(volatile uint32_t *)(gmu + 0x14644u) = (1u << 30);	/* INTR_CLR */
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	return info;
+@@ -312,6 +313,14 @@ polaris_gpu_gmu_boot(void)
+ 	    *(volatile uint32_t *)(gpucc + 0x109cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x1064u));
+ 
++	/* 2a. clear stale GMU interrupt latches (official gmu_irq_enable) */
++	*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;	/* GMU2HOST_INTR_CLR */
++	*(volatile uint32_t *)(gpu + 0x24c10u) = 0xffffffffu;	/* AO_HOST_INTR_CLR */
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("POLARIS BOOT: intrs cleared, info=0x%08x ao=0x%08x\n",
++	    *(volatile uint32_t *)(gpu + 0x14648u),
++	    *(volatile uint32_t *)(gpu + 0x24c14u));
++
+ 	/* 2b. RSC/PDC sequencer microcode (optin 35) */
+ 	if (optin == 35) {
+ 		vm_offset_t pdc = ml_io_map(0xb200000ull, 0x300000);
+@@ -377,7 +386,11 @@ polaris_gpu_gmu_boot(void)
+ 	    (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
+ 	if (optin == 35 && v == 0xbabefaceu) {
+ 		uint32_t info = polaris_gfx_rail_on(gpu, 8u, 3u);
+-		printf("POLARIS BOOT: oob_info=0x%08x gx_idx=8 mx_idx=3\n", info);
++		printf("POLARIS BOOT: oob_info=0x%08x ack=%u gx_idx=8 mx_idx=3\n",
++		    info, (info & (1u << 30)) ? 1u : 0u);
++		printf("POLARIS BOOT: ao_status=0x%08x intr=0x%08x\n",
++		    *(volatile uint32_t *)(gpu + 0x24c14u),
++		    *(volatile uint32_t *)(gpu + 0x14648u));
+ 	}
+ 	printf("POLARIS BOOT: GX=0x%08x CX=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpucc + 0x100cu),
