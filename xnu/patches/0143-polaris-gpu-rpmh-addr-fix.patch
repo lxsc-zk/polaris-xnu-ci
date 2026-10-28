@@ -1,0 +1,15 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 8bbeaa2..991626f 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -1966,8 +1966,8 @@ polaris_gpu_rpmh(void)
+  *   RSC 0x18220000, TCS 0x18220d00, cmd-db via locator 0x0c3f000c,
+  *   CONTROL must go AMC_EN then AMC_EN|TRIGGER, completion is CMD_STATUS.
+  */
+-#define P_RSC_PA	0x18220000ull
+-#define P_TCS_PA	0x18220d00ull
++#define P_RSC_PA	0x179e0000ull
++#define P_TCS_PA	0x179e0d00ull
+ #define P_TCS_SIZE	0x3000u
+ #define P_DICT_PA	0x0c3f000cu
+ #define P_STRIDE	0x2a0u
