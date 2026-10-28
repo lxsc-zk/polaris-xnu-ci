@@ -1,0 +1,37 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 6637041..69fbf43 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -401,6 +401,32 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 	printf("POLARIS BOOT: FW_INIT_RESULT=0x%08x polls=%u %s\n", v, i,
+ 	    (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
++	if (v == 0xbabefaceu) {
++		/* official gmu_irq_enable: unmask message-queue and fault IRQs */
++		*(volatile uint32_t *)(gpu + 0x1464cu) = 0xff7ffffeu;	/* GMU2HOST_INTR_MASK */
++		*(volatile uint32_t *)(gpu + 0x24c18u) = 0xffffffd6u;	/* AO_HOST_INTR_MASK */
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS BOOT: hfi_status=0x%08x hfi_ver=0x%08x mask=0x%08x\n",
++		    *(volatile uint32_t *)(gpu + 0x14600u),
++		    *(volatile uint32_t *)(gpu + 0x14604u),
++		    *(volatile uint32_t *)(gpu + 0x1464cu));
++		printf("POLARIS BOOT: fwinit=0x%08x info=0x%08x ao=0x%08x\n",
++		    *(volatile uint32_t *)(gpu + 0x14070u),
++		    *(volatile uint32_t *)(gpu + 0x14648u),
++		    *(volatile uint32_t *)(gpu + 0x24c14u));
++		/* try HFI init without a queue table, just to observe the status */
++		*(volatile uint32_t *)(gpu + 0x14618u) = 1u;	/* HFI_CTRL_INIT */
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		for (i = 0; i < 200000u; i++) {
++			if (*(volatile uint32_t *)(gpu + 0x14600u) & 1u) {
++				break;
++			}
++			__asm__ __volatile__("nop");
++		}
++		printf("POLARIS BOOT: hfi_ctrl=0x%08x polls=%u\n",
++		    *(volatile uint32_t *)(gpu + 0x14600u), i);
++	}
++
+ 	if (optin == 35 && v == 0xbabefaceu) {
+ 		uint32_t info = polaris_gfx_rail_on(gpu, 8u, 3u);
+ 		printf("POLARIS BOOT: oob_info=0x%08x ack=%u gx_idx=8 mx_idx=3\n",
