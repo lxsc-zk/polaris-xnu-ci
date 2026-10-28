@@ -1,8 +1,16 @@
 diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
-index 86777d0..d7427f2 100644
+index 86777d0..e8981a7 100644
 --- a/bsd/dev/polaris_gpu_diag.c
 +++ b/bsd/dev/polaris_gpu_diag.c
-@@ -137,4 +137,149 @@ polaris_gpu_diag(void)
+@@ -10,6 +10,7 @@
+ #include <pexpert/device_tree.h>
+ 
+ extern bool polaris_touch_i2c_board(void);
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ 
+ #define GPU_BLOB_COUNT 6u
+ #define GPU_PAGE       0x4000ull
+@@ -137,4 +138,146 @@ polaris_gpu_diag(void)
  		}
  	}
  }
@@ -32,7 +40,8 @@ index 86777d0..d7427f2 100644
 +	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
 +	    !gpu_pair(mmap, "GPU-GMU", &blob, &blob_size) ||
 +	    blob_size != 32768u || !blob) {
-+		printf("POLARIS BOOT: GPU-GMU blob missing/size=%llu\n", blob_size);
++		printf("POLARIS BOOT: GPU-GMU blob missing/size=%llu\n",
++		    (unsigned long long)blob_size);
 +		return;
 +	}
 +	printf("POLARIS BOOT: blob=0x%llx size=%llu\n",
@@ -68,16 +77,14 @@ index 86777d0..d7427f2 100644
 +	*(volatile uint32_t *)(gcc + 0x7100cu) |= 1u;
 +	*(volatile uint32_t *)(gcc + 0x71018u) |= 1u;
 +	*(volatile uint32_t *)(gcc + 0x44038u) |= 1u;
-+	/* gmu_clk_src RCG: root enable, 200 MHz from GPLL0/1.5, then update */
 +	*(volatile uint32_t *)(gpucc + 0x1120u) = 0x00000002u;
 +	*(volatile uint32_t *)(gpucc + 0x1124u) = 0x00000601u;
 +	*(volatile uint32_t *)(gpucc + 0x1120u) = 0x00000003u;
-+	/* cx_gmu_clk branch: wake/sleep nibbles + enable */
 +	v = *(volatile uint32_t *)(gpucc + 0x1098u);
 +	*(volatile uint32_t *)(gpucc + 0x1098u) =
 +	    (v & ~(1u << 31)) | 1u | (0xfu << 4) | (0xfu << 8);
-+	*(volatile uint32_t *)(gpucc + 0x109cu) |= 1u;	/* cxo_clk */
-+	*(volatile uint32_t *)(gpucc + 0x1064u) |= 1u;	/* gx_gmu_clk */
++	*(volatile uint32_t *)(gpucc + 0x109cu) |= 1u;
++	*(volatile uint32_t *)(gpucc + 0x1064u) |= 1u;
 +	__asm__ __volatile__("dsb sy" ::: "memory");
 +	printf("POLARIS BOOT: rcg=0x%08x cbcr1098=0x%08x 109c=0x%08x 1064=0x%08x\n",
 +	    *(volatile uint32_t *)(gpucc + 0x1120u),
@@ -92,15 +99,13 @@ index 86777d0..d7427f2 100644
 +	printf("POLARIS BOOT: GENERAL_7@0x507E730=0x%08x %s\n", v,
 +	    (v == 0xdeadbeefu) ? "ADDR-OK" : "ADDR-FAIL");
 +	if (v != 0xdeadbeefu) {
-+		/* compare with the previously used (wrong) address */
 +		*(volatile uint32_t *)(gpu + 0x1f9ccu) = 0xcafebabeu;
 +		__asm__ __volatile__("dsb sy" ::: "memory");
 +		printf("POLARIS BOOT: old@0x50899CC=0x%08x (hole expected)\n",
 +		    *(volatile uint32_t *)(gpu + 0x1f9ccu));
 +		return;
 +	}
-+	/* TCM retention on */
-+	*(volatile uint32_t *)(gpu + 0x7e730u) = 1u;
++	*(volatile uint32_t *)(gpu + 0x7e730u) = 1u;	/* TCM retention */
 +
 +	/* 4. ITCM: 32 KiB -> 0x506D000 */
 +	for (i = 0; i < 8192u; i++) {
@@ -108,7 +113,7 @@ index 86777d0..d7427f2 100644
 +		    *(volatile uint32_t *)(src + i * 4u);
 +	}
 +	__asm__ __volatile__("dsb sy" ::: "memory");
-+	printf("POLARIS BOOT: ITCM loaded, first=0x%08x last=0x%08x\n",
++	printf("POLARIS BOOT: ITCM first=0x%08x last=0x%08x\n",
 +	    *(volatile uint32_t *)(gpu + 0x6d000u),
 +	    *(volatile uint32_t *)(gpu + 0x6d000u + 8191u * 4u));
 +
@@ -122,9 +127,9 @@ index 86777d0..d7427f2 100644
 +	    *(volatile uint32_t *)(gpu + 0x7e004u),
 +	    *(volatile uint32_t *)(gpu + 0x7e070u));
 +
-+	*(volatile uint32_t *)(gpu + 0x7e000u) = 1u;	/* CM3_SYSRESET = 1 */
++	*(volatile uint32_t *)(gpu + 0x7e000u) = 1u;
 +	__asm__ __volatile__("dsb sy" ::: "memory");
-+	*(volatile uint32_t *)(gpu + 0x7e000u) = 0u;	/* release */
++	*(volatile uint32_t *)(gpu + 0x7e000u) = 0u;
 +	__asm__ __volatile__("dsb sy" ::: "memory");
 +
 +	/* 6. poll for the GMU init magic */
