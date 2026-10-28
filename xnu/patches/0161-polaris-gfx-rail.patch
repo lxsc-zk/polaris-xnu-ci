@@ -1,0 +1,146 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index e44f0e4..bc6902e 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -139,6 +139,102 @@ polaris_gpu_diag(void)
+ 	}
+ }
+ 
++/* RSC sequencer microcode: offsets are window-relative (define<<2 - 0x6a000). */
++static void
++polaris_rsc_ucode(vm_offset_t gmu)
++{
++	static const uint32_t seq[5] = {
++		0xa7a506a0u, 0xa1e6a6e7u, 0xa2e081e1u, 0xe9a982e2u, 0x0020e8a8u,
++	};
++	uint32_t i;
++
++	*(volatile uint32_t *)(gmu + 0x23010u) = (1u << 24);
++	*(volatile uint32_t *)(gmu + 0x2302cu) = 1u;
++	*(volatile uint32_t *)(gmu + 0x23038u) = 0u;
++	*(volatile uint32_t *)(gmu + 0x23034u) = 0u;
++	*(volatile uint32_t *)(gmu + 0x23040u) = 0u;
++	*(volatile uint32_t *)(gmu + 0x2303cu) = 0u;
++	*(volatile uint32_t *)(gmu + 0x23048u) = 0x80000000u;
++	*(volatile uint32_t *)(gmu + 0x23044u) = 0u;
++	*(volatile uint32_t *)(gmu + 0x23400u) = 0u;
++	*(volatile uint32_t *)(gmu + 0x23020u) = 0x4520u;
++	*(volatile uint32_t *)(gmu + 0x23024u) = 0x4510u;
++	*(volatile uint32_t *)(gmu + 0x23028u) = 0x4514u;
++	*(volatile uint32_t *)(gmu + 0x23224u) = 1u;
++	for (i = 0; i < 5u; i++) {
++		*(volatile uint32_t *)(gmu + 0x23600u + i * 4u) = seq[i];
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++}
++
++/* PDC sequencer microcode (write offsets are define<<2 from 0xb200000). */
++static void
++polaris_pdc_ucode(vm_offset_t pdc)
++{
++	static const uint32_t seq[5] = {
++		0xfebea1e1u, 0xa5a4a3a2u, 0x8382a6e0u, 0xbce3e284u, 0x002081fcu,
++	};
++	uint32_t i;
++
++	for (i = 0; i < 5u; i++) {
++		*(volatile uint32_t *)(pdc + 0x280000u + i * 4u) = seq[i];
++	}
++	/* TCS1: sleep (1 -> 0 -> 0) */
++	*(volatile uint32_t *)(pdc + 0x855c8u) = 0u;
++	*(volatile uint32_t *)(pdc + 0x855ccu) = 7u;
++	*(volatile uint32_t *)(pdc + 0x855d0u) = 0u;
++	*(volatile uint32_t *)(pdc + 0x855d4u) = 0x10108u;
++	*(volatile uint32_t *)(pdc + 0x855d8u) = 0x30010u;
++	*(volatile uint32_t *)(pdc + 0x855dcu) = 1u;
++	*(volatile uint32_t *)(pdc + 0x855e4u) = 0x10108u;
++	*(volatile uint32_t *)(pdc + 0x855e8u) = 0x30000u;
++	*(volatile uint32_t *)(pdc + 0x855ecu) = 0u;
++	*(volatile uint32_t *)(pdc + 0x855f4u) = 0x10108u;
++	*(volatile uint32_t *)(pdc + 0x855f8u) = 0x30080u;
++	*(volatile uint32_t *)(pdc + 0x855fcu) = 0u;
++	/* TCS3: wake (2 -> 3 -> 3) */
++	*(volatile uint32_t *)(pdc + 0x85758u) = 0u;
++	*(volatile uint32_t *)(pdc + 0x8575cu) = 7u;
++	*(volatile uint32_t *)(pdc + 0x85760u) = 0u;
++	*(volatile uint32_t *)(pdc + 0x85764u) = 0x10108u;
++	*(volatile uint32_t *)(pdc + 0x85768u) = 0x30010u;
++	*(volatile uint32_t *)(pdc + 0x8576cu) = 2u;
++	*(volatile uint32_t *)(pdc + 0x85774u) = 0x10108u;
++	*(volatile uint32_t *)(pdc + 0x85778u) = 0x30000u;
++	*(volatile uint32_t *)(pdc + 0x8577cu) = 3u;
++	*(volatile uint32_t *)(pdc + 0x85784u) = 0x10108u;
++	*(volatile uint32_t *)(pdc + 0x85788u) = 0x30080u;
++	*(volatile uint32_t *)(pdc + 0x8578cu) = 3u;
++	*(volatile uint32_t *)(pdc + 0x84520u) = 0u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	*(volatile uint32_t *)(pdc + 0x84500u) = 0x80000001u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++}
++
++/* GX rail on via the GMU out-of-band handshake (official a6xx_gfx_rail_on). */
++static uint32_t
++polaris_gfx_rail_on(vm_offset_t gmu, uint32_t gx_idx, uint32_t mx_idx)
++{
++	uint32_t i, info = 0;
++
++	*(volatile uint32_t *)(gmu + 0x8fe0u) = 0u;	/* BOOT_SLUMBER_OPTION */
++	*(volatile uint32_t *)(gmu + 0x8fe4u) = gx_idx;
++	*(volatile uint32_t *)(gmu + 0x8fe8u) = mx_idx;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	*(volatile uint32_t *)(gmu + 0x14650u) = (1u << 22);	/* HOST2GMU_INTR_SET */
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (i = 0; i < 100000u; i++) {
++		info = *(volatile uint32_t *)(gmu + 0x14648u);
++		if (info & (1u << 30)) {
++			break;
++		}
++		__asm__ __volatile__("nop");
++	}
++	*(volatile uint32_t *)(gmu + 0x14644u) = (1u << 30);	/* INTR_CLR */
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	return info;
++}
++
+ /*
+  * Minimal GMU boot attempt with the correct A6xx addressing
+  * (absolute = 0x5000000 + (register define << 2)):
+@@ -158,7 +254,7 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+-	if (optin != 34) {
++	if (optin != 34 && optin != 35) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -216,6 +312,18 @@ polaris_gpu_gmu_boot(void)
+ 	    *(volatile uint32_t *)(gpucc + 0x109cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x1064u));
+ 
++	/* 2b. RSC/PDC sequencer microcode (optin 35) */
++	if (optin == 35) {
++		vm_offset_t pdc = ml_io_map(0xb200000ull, 0x300000);
++		if (pdc) {
++			polaris_rsc_ucode(gpu);
++			polaris_pdc_ucode(pdc);
++			printf("POLARIS BOOT: rsc/pdc ucode written\n");
++		} else {
++			printf("POLARIS BOOT: pdc map failed\n");
++		}
++	}
++
+ 	/* 3. addressing proof: GENERAL_7 at 0x507E730 */
+ 	*(volatile uint32_t *)(gpu + 0x14730u) = 0xdeadbeefu;
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+@@ -267,6 +375,10 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 	printf("POLARIS BOOT: FW_INIT_RESULT=0x%08x polls=%u %s\n", v, i,
+ 	    (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
++	if (optin == 35 && v == 0xbabefaceu) {
++		uint32_t info = polaris_gfx_rail_on(gpu, 8u, 3u);
++		printf("POLARIS BOOT: oob_info=0x%08x gx_idx=8 mx_idx=3\n", info);
++	}
+ 	printf("POLARIS BOOT: GX=0x%08x CX=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpucc + 0x100cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x106cu));
