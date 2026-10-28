@@ -1,0 +1,28 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 620a389..6637041 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -358,6 +358,23 @@ polaris_gpu_gmu_boot(void)
+ 	    *(volatile uint32_t *)(gpu + 0x3000u),
+ 	    *(volatile uint32_t *)(gpu + 0x3000u + 8191u * 4u));
+ 
++	/* 4b. steps the official driver does before releasing reset */
++	*(volatile uint32_t *)(gpu + 0x14608u) = 0x06030000u;	/* HFI_SFR_ADDR = chipid */
++	*(volatile uint32_t *)(gpu + 0x24c44u) = 0x80a008a0u;	/* AHB_FENCE_RANGE_0 */
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	/* a6xx_gmu_power_config */
++	*(volatile uint32_t *)(gpu + 0x1303cu) = 0x1u;		/* SYS_BUS_CONFIG */
++	*(volatile uint32_t *)(gpu + 0x14300u) = 0x09c40400u;	/* IFPC ctrl */
++	*(volatile uint32_t *)(gpu + 0x14390u) |= (1u << 0);	/* NAP enable */
++	*(volatile uint32_t *)(gpu + 0x14304u) = 0x000a1680u;	/* IFPC hyst */
++	*(volatile uint32_t *)(gpu + 0x14300u) |= (1u << 1) | (1u << 0);
++	*(volatile uint32_t *)(gpu + 0x143a0u) |= 0x00000f11u;	/* RPMH_CTRL: enable votes */
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("POLARIS BOOT: sfr=0x%08x rpmh=0x%08x sysbus=0x%08x\n",
++	    *(volatile uint32_t *)(gpu + 0x14608u),
++	    *(volatile uint32_t *)(gpu + 0x143a0u),
++	    *(volatile uint32_t *)(gpu + 0x1303cu));
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
