@@ -1,0 +1,181 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 3f9b414..afafce3 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2384,6 +2384,161 @@ polaris_gpu_vrm(void)
+ 	}
+ }
+ 
++/*
++ * Vote the three ARC rails with the top VLVL value taken from each rail's
++ * own cmd_db aux table. The table is a monotonically increasing list of
++ * level encodings, not millivolts.
++ */
++static int
++polaris_arc_lookup(vm_offset_t db, uint32_t pa, uint32_t size,
++    const char *key7, uint32_t *addr, uint32_t *vlvl)
++{
++	uint32_t i, j, h, cnt, ent, aux_base, al, ao, k, best = 0, valid = 0;
++
++	(void)pa; (void)size;
++	for (i = 0; i < 8; i++) {
++		uint32_t w;
++		h = 8u + 16u * i;
++		w = pwr_read(db, h + 4u);
++		cnt = (w >> 16) & 0xffffu;
++		if (cnt == 0 || cnt > 200) {
++			continue;
++		}
++		ent = 0x90u + ((pwr_read(db, h) >> 16) & 0xffffu);
++		aux_base = 0x90u + (w & 0xffffu);
++		for (j = 0; j < cnt; j++) {
++			uint32_t e = ent + 24u * j;
++			uint32_t w0 = pwr_read(db, e);
++			uint32_t w1 = pwr_read(db, e + 4u);
++			char n[8];
++			n[0] = (char)(w0 & 0xff);
++			n[1] = (char)((w0 >> 8) & 0xff);
++			n[2] = (char)((w0 >> 16) & 0xff);
++			n[3] = (char)((w0 >> 24) & 0xff);
++			n[4] = (char)(w1 & 0xff);
++			n[5] = (char)((w1 >> 8) & 0xff);
++			n[6] = (char)((w1 >> 16) & 0xff);
++			if (n[0] != key7[0] || n[1] != key7[1] ||
++			    n[2] != key7[2] || n[3] != key7[3] ||
++			    n[4] != key7[4] || n[5] != key7[5] ||
++			    n[6] != key7[6]) {
++				continue;
++			}
++			*addr = pwr_read(db, e + 16u);
++			al = pwr_read(db, e + 20u) & 0xffffu;
++			ao = (pwr_read(db, e + 20u) >> 16) & 0xffffu;
++			for (k = 0; k < al / 2u && k < 20u; k++) {
++				uint32_t off = aux_base + ao + 2u * k;
++				uint32_t wv = pwr_read(db, off & ~3u);
++				uint32_t val = (off & 2u) ? (wv >> 16) : (wv & 0xffffu);
++				if (val == 0) {
++					break;
++				}
++				best = val;
++				valid++;
++			}
++			if (!valid) {
++				return -1;
++			}
++			*vlvl = best;
++			printf("POLARIS ARC: %s addr=0x%08x levels=%u top=0x%x\n",
++			    key7, *addr, valid, best);
++			return 0;
++		}
++	}
++	return -1;
++}
++
++void
++polaris_gpu_arc(void)
++{
++	int optin = 0;
++	vm_offset_t dict, db, tcs, gpucc, gcc, gmu;
++	uint32_t pa, size, i, v;
++	uint32_t gfx_a = 0, cx_a = 0, mx_a = 0;
++	uint32_t gfx_v = 0, cx_v = 0, mx_v = 0;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 29) {
++		return;
++	}
++	dict = ml_io_map(0x0c3f000cu, 8);
++	tcs = ml_io_map(0x179e0d00ull, 0x3000u);
++	gpucc = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	gmu = ml_io_map(0x506a000ull, 0x30000);
++	if (!dict || !tcs || !gpucc || !gcc || !gmu) {
++		printf("POLARIS ARC: map failed\n");
++		return;
++	}
++	pa = pwr_read(dict, 0);
++	size = pwr_read(dict, 4);
++	db = ml_io_map(pa, size);
++	if (!db) {
++		printf("POLARIS ARC: db map failed\n");
++		return;
++	}
++	if (polaris_arc_lookup(db, pa, size, "mx.lvl", &mx_a, &mx_v) != 0 ||
++	    polaris_arc_lookup(db, pa, size, "cx.lvl", &cx_a, &cx_v) != 0 ||
++	    polaris_arc_lookup(db, pa, size, "gfx.lvl", &gfx_a, &gfx_v) != 0) {
++		printf("POLARIS ARC: lookup failed\n");
++		return;
++	}
++	polaris_rpmh_level(tcs, 0, mx_a, mx_v, "mx.lvl");
++	polaris_rpmh_level(tcs, 0, cx_a, cx_v, "cx.lvl");
++	polaris_rpmh_level(tcs, 0, gfx_a, gfx_v, "gfx.lvl");
++	pwr_delay();
++	v = pwr_read(gpucc, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(gpucc, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(gpucc, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gpucc, 0x101cu, 0x00000002u);
++	pwr_delay();
++	pwr_write(gpucc, 0x1020u, 0x00000501u);
++	pwr_delay();
++	v = pwr_read(gpucc, 0x1054u);
++	pwr_write(gpucc, 0x1054u, v | 1u);
++	pwr_delay();
++	printf("POLARIS ARC: branch1054=0x%08x\n", pwr_read(gpucc, 0x1054u));
++	v = pwr_read(gpucc, GDSC_GX);
++	pwr_write(gpucc, GDSC_GX, v & ~1u);
++	for (i = 0; i < 5000; i++) {
++		pwr_delay();
++		v = pwr_read(gpucc, GDSC_GX);
++		if (v & (1u << 31)) {
++			break;
++		}
++	}
++	printf("POLARIS ARC: GX=0x%08x polls=%u %s\n", v, i,
++	    (v & (1u << 31)) ? "ON" : "OFF");
++	pwr_write(gmu, 0x1f9ccu, 0xdeadbeefu);
++	pwr_delay();
++	v = pwr_read(gmu, 0x1f9ccu);
++	printf("POLARIS ARC: general7=0x%08x %s\n", v,
++	    (v == 0xdeadbeefu) ? "OK" : "FAIL");
++	pwr_write(gmu, 0x1f9ccu, 0u);
++	printf("POLARIS ARC: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 3d0d317..b9efa73 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -591,6 +591,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_vrm(void);
+ 		polaris_gpu_vrm();
+ 	}
++	{
++		extern void polaris_gpu_arc(void);
++		polaris_gpu_arc();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_window(void);
+ 		polaris_gpu_gmu_window();
