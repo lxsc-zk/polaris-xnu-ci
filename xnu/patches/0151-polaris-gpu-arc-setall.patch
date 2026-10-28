@@ -1,0 +1,73 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index e7ef3e1..0a85349 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2389,6 +2389,47 @@ polaris_gpu_vrm(void)
+  * own cmd_db aux table. The table is a monotonically increasing list of
+  * level encodings, not millivolts.
+  */
++
++static int
++polaris_rpmh_level_at(vm_offset_t tcs, uint32_t tid, uint32_t addr,
++    uint32_t level, const char *what)
++{
++	uint32_t b = tid * 0x2a0u;
++	uint32_t irq_en, st, cst = 0, irq = 0, i;
++	int ok = 0;
++
++	st = pwr_read(tcs, b + 0x18u);
++	if (st == 0 || st == 0xffffffffu) {
++		printf("POLARIS ARC: tcs%u %s not idle (0x%08x)\\n", tid, what, st);
++		return -1;
++	}
++	irq_en = pwr_read(tcs, 0x00u);
++	pwr_write(tcs, 0x00u, irq_en & ~(1u << tid));
++	pwr_write(tcs, b + 0x30u, 8u | (1u << 8) | (1u << 16));
++	pwr_write(tcs, b + 0x34u, addr);
++	pwr_write(tcs, b + 0x38u, level);
++	pwr_write(tcs, b + 0x10u, 1u);
++	pwr_write(tcs, b + 0x1cu, 1u);
++	pwr_write(tcs, b + 0x14u, 0u);
++	pwr_write(tcs, b + 0x14u, (1u << 16));
++	pwr_delay();
++	pwr_write(tcs, b + 0x14u, (1u << 16) | (1u << 24));
++	for (i = 0; i < 20000; i++) {
++		irq = pwr_read(tcs, 0x04u);
++		cst = pwr_read(tcs, b + 0x3cu);
++		if (cst != 0xffffffffu &&
++		    (cst & 0x00010100u) == 0x00010100u) {
++			ok = 1;
++			break;
++		}
++		pwr_delay();
++	}
++	printf("POLARIS ARC: tcs%u %s addr=0x%08x lvl=%u cmd=0x%08x %s\\n",
++	    tid, what, addr, level, cst, ok ? "OK" : "TIMEOUT");
++	pwr_write(tcs, 0x08u, 0xffffffffu);
++	return ok ? 0 : -1;
++}
++
+ static int
+ polaris_arc_lookup(vm_offset_t db, uint32_t pa, uint32_t size,
+     const char *key7, uint32_t *addr, uint32_t *vlvl)
+@@ -2494,9 +2535,17 @@ polaris_gpu_arc(void)
+ 		printf("POLARIS ARC: lookup failed\n");
+ 		return;
+ 	}
+-	polaris_rpmh_level(tcs, 0, mx_a, mx_v, "mx.lvl");
+-	polaris_rpmh_level(tcs, 0, cx_a, cx_v, "cx.lvl");
+-	polaris_rpmh_level(tcs, 0, gfx_a, gfx_v, "gfx.lvl");
++	/* qcom,set = RPMH_REGULATOR_SET_ALL: write the vote into every TCS group */
++	{
++		static const uint32_t tcs_ids[3] = { 0u, 2u, 5u };	/* ACTIVE, SLEEP, WAKE */
++		uint32_t gi;
++		for (gi = 0; gi < 3; gi++) {
++			printf("POLARIS ARC: --- tcs %u ---\n", tcs_ids[gi]);
++			polaris_rpmh_level_at(tcs, tcs_ids[gi], mx_a, mx_v, "mx.lvl");
++			polaris_rpmh_level_at(tcs, tcs_ids[gi], cx_a, cx_v, "cx.lvl");
++			polaris_rpmh_level_at(tcs, tcs_ids[gi], gfx_a, gfx_v, "gfx.lvl");
++		}
++	}
+ 	pwr_delay();
+ 	v = pwr_read(gpucc, GDSC_CX);
+ 	if (!(v & (1u << 31))) {
