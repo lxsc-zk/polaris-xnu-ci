@@ -1,0 +1,131 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 2602b87..006fb69 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2888,6 +2888,111 @@ polaris_gpu_fence(void)
+ 	}
+ }
+ 
++/*
++ * GMU register byte address = 0x5000000 + (define << 2): the a6xx headers
++ * store dword indices and kgsl_regwrite shifts them. Our earlier probes used
++ * the raw define as a byte offset, which lands in holes that read zero and
++ * silently drop writes.
++ */
++void
++polaris_gpu_gmu_addr(void)
++{
++	int optin = 0;
++	vm_offset_t gpu, gpucc, gcc;
++	uint32_t v, i, w;
++	/* dword indices from a6xx_reg.h */
++	static const struct { uint32_t dw; const char *name; } regs[] = {
++		{ 0x1f800u, "cm3_sysreset" },
++		{ 0x1f801u, "cm3_boot_config" },
++		{ 0x1f81cu, "cm3_fw_init" },
++		{ 0x1f9ccu, "general_7" },
++		{ 0x1b400u, "itcm_start" },
++		{ 0x23b10u, "ahb_fence_ctrl" },
++		{ 0x23b04u, "ao_intr" },
++	};
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 33) {
++		return;
++	}
++	gpu = ml_io_map(0x5000000ull, 0x1000000);
++	gpucc = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	if (!gpu || !gpucc || !gcc) {
++		printf("POLARIS GMA: map failed\n");
++		return;
++	}
++	/* CX on */
++	v = pwr_read(gpucc, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(gpucc, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			pwr_delay();
++			v = pwr_read(gpucc, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	/* GPLL0 gates + GPU clocks */
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gcc, 0x71004u, pwr_read(gcc, 0x71004u) | 1u);
++	pwr_write(gcc, 0x7100cu, pwr_read(gcc, 0x7100cu) | 1u);
++	pwr_write(gcc, 0x71018u, pwr_read(gcc, 0x71018u) | 1u);
++	pwr_write(gcc, 0x44038u, pwr_read(gcc, 0x44038u) | 1u);
++	pwr_delay();
++	/* gmu clk source + branches */
++	pwr_write(gpucc, 0x1120u, 0x00000002u);
++	pwr_delay();
++	pwr_write(gpucc, 0x1124u, 0x00000601u);
++	pwr_delay();
++	pwr_write(gpucc, 0x1120u, 0x00000003u);
++	pwr_delay();
++	v = pwr_read(gpucc, 0x1098u);
++	v |= (0xfu << 8) | (0xfu << 4);
++	v &= ~(1u << 31);
++	v |= 1u;
++	pwr_write(gpucc, 0x1098u, v);
++	pwr_write(gpucc, 0x109cu, pwr_read(gpucc, 0x109cu) | 1u);
++	pwr_write(gpucc, 0x1064u, pwr_read(gpucc, 0x1064u) | 1u);
++	pwr_delay();
++	printf("POLARIS GMA: CX=0x%08x cbcr1098=0x%08x cbcr109c=0x%08x cbcr1064=0x%08x\n",
++	    pwr_read(gpucc, GDSC_CX), pwr_read(gpucc, 0x1098u),
++	    pwr_read(gpucc, 0x109cu), pwr_read(gpucc, 0x1064u));
++	/* read all with the corrected addressing */
++	for (i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
++		uint32_t byte = regs[i].dw << 2;
++		printf("POLARIS GMA: %s dw=0x%05x byte=0x%06x read=0x%08x\n",
++		    regs[i].name, regs[i].dw, byte, pwr_read(gpu, byte));
++	}
++	/* write test on GENERAL_7 (0x7E730) */
++	pwr_write(gpu, 0x1f9ccu << 2, 0xdeadbeefu);
++	pwr_delay();
++	v = pwr_read(gpu, 0x1f9ccu << 2);
++	printf("POLARIS GMA: general7 write/read=0x%08x %s\n", v,
++	    (v == 0xdeadbeefu) ? "OK" : "FAIL");
++	pwr_write(gpu, 0x1f9ccu << 2, 0u);
++	/* ITCM first word */
++	pwr_write(gpu, 0x1b400u << 2, 0xcafebabeu);
++	pwr_delay();
++	v = pwr_read(gpu, 0x1b400u << 2);
++	printf("POLARIS GMA: itcm write/read=0x%08x %s\n", v,
++	    (v == 0xcafebabeu) ? "OK" : "FAIL");
++	printf("POLARIS GMA: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 985e1a5..27293fa 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -607,6 +607,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_fence(void);
+ 		polaris_gpu_fence();
+ 	}
++	{
++		extern void polaris_gpu_gmu_addr(void);
++		polaris_gpu_gmu_addr();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_window(void);
+ 		polaris_gpu_gmu_window();
