@@ -1,0 +1,55 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 55d5497..227a45f 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2254,6 +2254,27 @@ polaris_gpu_vrm(void)
+ 			name[6] = (char)((w1 >> 16) & 0xff);
+ 			name[7] = (char)((w1 >> 24) & 0xff);
+ 			name[8] = 0;
++			if (name[0] == 'g' && name[1] == 'f' && name[2] == 'x' &&
++			    name[3] == '.' && name[4] == 'l' && name[5] == 'v' &&
++			    name[6] == 'l') {
++				uint32_t al = (pwr_read(db, e + 20u) >> 16) & 0xffffu;
++				uint32_t ao = pwr_read(db, e + 20u) & 0xffffu;
++				uint32_t n = al / 2u;
++				if (n > 20u) {
++					n = 20u;
++				}
++				printf("POLARIS VRM: gfx.lvl aux_len=%u off=0x%x\n", al, ao);
++				for (uint32_t k = 0; k < n; k++) {
++					uint32_t off = aux_base + ao + 2u * k;
++					uint32_t w = pwr_read(db, off & ~3u);
++					uint32_t val = (off & 2u) ? (w >> 16) : (w & 0xffffu);
++					printf("POLARIS VRM: lvl[%u]=%u mV\n", k, val);
++					if (k == 4u && val > 400u && val < 1400u) {
++						mv = val;
++					}
++				}
++				continue;
++			}
+ 			if (name[0] != 'v' || name[1] != 'r' || name[2] != 'm' ||
+ 			    name[3] != '.' || name[4] != 'g' || name[5] != 'f' ||
+ 			    name[6] != 'x') {
+@@ -2264,19 +2285,9 @@ polaris_gpu_vrm(void)
+ 			aux_off = pwr_read(db, e + 20u) & 0xffffu;
+ 			printf("POLARIS VRM: vrm.gfx addr=0x%08x aux_len=%u aux_off=0x%x\n",
+ 			    addr, aux_len, aux_off);
+-			num = aux_len / 2u;
+-			if (num > 20) {
+-				num = 20;
+-			}
+-			for (uint32_t k = 0; k < num; k++) {
+-				uint32_t off = aux_base + aux_off + 2u * k;
+-				uint32_t w = pwr_read(db, off & ~3u);
+-				uint32_t val = (off & 2u) ? (w >> 16) : (w & 0xffffu);
+-				printf("POLARIS VRM: lvl[%u]=%u mV\n", k, val);
+-				if (val > mv && val < 2000u) {
+-					mv = val;
+-				}
+-			}
++			(void)num;
++			(void)aux_len;
++			(void)aux_off;
+ 			found = 1;
+ 			break;
+ 		}
