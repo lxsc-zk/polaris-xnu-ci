@@ -1,0 +1,24 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 227a45f..3f9b414 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2257,8 +2257,8 @@ polaris_gpu_vrm(void)
+ 			if (name[0] == 'g' && name[1] == 'f' && name[2] == 'x' &&
+ 			    name[3] == '.' && name[4] == 'l' && name[5] == 'v' &&
+ 			    name[6] == 'l') {
+-				uint32_t al = (pwr_read(db, e + 20u) >> 16) & 0xffffu;
+-				uint32_t ao = pwr_read(db, e + 20u) & 0xffffu;
++				uint32_t al = pwr_read(db, e + 20u) & 0xffffu;
++				uint32_t ao = (pwr_read(db, e + 20u) >> 16) & 0xffffu;
+ 				uint32_t n = al / 2u;
+ 				if (n > 20u) {
+ 					n = 20u;
+@@ -2269,7 +2269,7 @@ polaris_gpu_vrm(void)
+ 					uint32_t w = pwr_read(db, off & ~3u);
+ 					uint32_t val = (off & 2u) ? (w >> 16) : (w & 0xffffu);
+ 					printf("POLARIS VRM: lvl[%u]=%u mV\n", k, val);
+-					if (k == 4u && val > 400u && val < 1400u) {
++					if (val > mv) {
+ 						mv = val;
+ 					}
+ 				}
