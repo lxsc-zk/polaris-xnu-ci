@@ -1,0 +1,18 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 3af7efd..2602b87 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2827,6 +2827,13 @@ polaris_gpu_fence(void)
+ 	v = pwr_read(gpucc, 0x109cu) | 1u;
+ 	pwr_write(gpucc, 0x109cu, v);
+ 	pwr_delay();
++	/* gpu_cc_gx_gmu_clk at 0x1064: the GX side of the GMU clock tree */
++	v = pwr_read(gpucc, 0x1064u);
++	printf("POLARIS FNC: gx_gmu_clk(0x1064) before=0x%08x\n", v);
++	pwr_write(gpucc, 0x1064u, (v & ~(1u << 31)) | 1u);
++	pwr_delay();
++	printf("POLARIS FNC: gx_gmu_clk(0x1064) after =0x%08x\n",
++	    pwr_read(gpucc, 0x1064u));
+ 	printf("POLARIS FNC: GDSC_CX=0x%08x hw_ctrl=0x%08x GDSC_GX=0x%08x\n",
+ 	    pwr_read(gpucc, GDSC_CX), pwr_read(gpucc, 0x1540u),
+ 	    pwr_read(gpucc, GDSC_GX));
