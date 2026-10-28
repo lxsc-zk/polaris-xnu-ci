@@ -1,0 +1,44 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 56dedf0..70e6581 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -1820,20 +1820,22 @@ rpmh_write_level(vm_offset_t rsc, uint32_t addr, uint32_t level,
+ 	pwr_write(rsc, base + RPMH_CMD_ADDR, addr);
+ 	pwr_write(rsc, base + RPMH_CMD_DATA, level);
+ 	pwr_delay();
+-	pwr_write(rsc, 0x08u, 0xffffffffu);
++	/* IRQ registers live at the TCS base, not the DRV base */
++	pwr_write(rsc, base + 0x00u, 0x3u);
++	pwr_write(rsc, base + 0x08u, 0xffffffffu);
+ 	pwr_write(rsc, base + RPMH_CMD_ENABLE, 1u);
+ 	for (i = 0; i < 20000; i++) {
+-		uint32_t irq = pwr_read(rsc, 0x04u);
++		uint32_t irq = pwr_read(rsc, base + 0x04u);
+ 		uint32_t en = pwr_read(rsc, base + RPMH_CMD_ENABLE);
+ 		v = irq;
+-		if ((irq & 0x4u) || en == 0u) {
++		if ((irq & 0x1u) || en == 0u) {
+ 			ok = 1;
+ 			break;
+ 		}
+ 		pwr_delay();
+ 	}
+ 	printf("POLARIS RPMH: %s addr=0x%08x level=%u irq=0x%08x en=0x%08x polls=%u %s\n",
+-	    what, addr, level, pwr_read(rsc, 0x04u),
++	    what, addr, level, pwr_read(rsc, base + 0x04u),
+ 	    pwr_read(rsc, base + RPMH_CMD_ENABLE), i,
+ 	    ok ? "OK" : "TIMEOUT");
+ 	pwr_write(rsc, base + RPMH_IRQ_CLEAR, 0xffffffffu);
+@@ -1889,8 +1891,10 @@ polaris_gpu_rpmh(void)
+ 		printf("POLARIS RPMH: mx.lvl addr=0x%08x levels=%u\n",
+ 		    mx.addr, mx.levels);
+ 	}
+-	printf("POLARIS RPMH: rsc control=0x%08x status=0x%08x irq=0x%08x\n",
+-	    pwr_read(rsc, 0x14u), pwr_read(rsc, 0x18u), pwr_read(rsc, 0x04u));
++	printf("POLARIS RPMH: solver=0x%08x prnt=0x%08x\n",
++	    pwr_read(rsc, 0x04u), pwr_read(rsc, 0x0cu));
++	printf("POLARIS RPMH: tcs irq_en=0x%08x irq_sts=0x%08x\n",
++	    pwr_read(rsc, RPMH_TCS_BASE_OFF), pwr_read(rsc, RPMH_TCS_BASE_OFF + 0x04u));
+ 	printf("POLARIS RPMH: tcs0 cmd_enable=0x%08x status=0x%08x\n",
+ 	    pwr_read(rsc, RPMH_TCS_BASE_OFF + 0x1cu),
+ 	    pwr_read(rsc, RPMH_TCS_BASE_OFF + 0x18u));
