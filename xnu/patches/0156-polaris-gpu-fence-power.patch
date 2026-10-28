@@ -1,0 +1,57 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index c416704..3af7efd 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2795,6 +2795,38 @@ polaris_gpu_fence(void)
+ 		printf("POLARIS FNC: map failed\n");
+ 		return;
+ 	}
++	/* power CX first, otherwise GPUCC reads back all zeros */
++	v = pwr_read(gpucc, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(gpucc, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			pwr_delay();
++			v = pwr_read(gpucc, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	/* keep the four GMU clocks running */
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gcc, 0x44038u, pwr_read(gcc, 0x44038u) | 1u);
++	pwr_write(gcc, 0x7100cu, pwr_read(gcc, 0x7100cu) | 1u);
++	pwr_write(gpucc, 0x1120u, 0x00000002u);
++	pwr_delay();
++	pwr_write(gpucc, 0x1124u, 0x00000601u);
++	pwr_delay();
++	pwr_write(gpucc, 0x1120u, 0x00000003u);
++	pwr_delay();
++	v = pwr_read(gpucc, 0x1098u);
++	v |= (0xfu << 8) | (0xfu << 4);
++	v &= ~(1u << 31);
++	v |= 1u;
++	pwr_write(gpucc, 0x1098u, v);
++	v = pwr_read(gpucc, 0x109cu) | 1u;
++	pwr_write(gpucc, 0x109cu, v);
++	pwr_delay();
+ 	printf("POLARIS FNC: GDSC_CX=0x%08x hw_ctrl=0x%08x GDSC_GX=0x%08x\n",
+ 	    pwr_read(gpucc, GDSC_CX), pwr_read(gpucc, 0x1540u),
+ 	    pwr_read(gpucc, GDSC_GX));
+@@ -2834,9 +2866,11 @@ polaris_gpu_fence(void)
+ 	printf("POLARIS FNC: general7=0x%08x %s\n", v,
+ 	    (v == 0xdeadbeefu) ? "OK" : "FAIL");
+ 	pwr_write(gmu, 0x1f9ccu, 0u);
+-	pwr_write(gmu, 0x23b06u, 0xffffffffu);
++	w = pwr_read(gmu, 0x23b04u);
++	pwr_write(gmu, 0x23b04u, w | 0xff000000u);
+ 	pwr_delay();
+-	printf("POLARIS FNC: ao_word23b04=0x%08x\n", pwr_read(gmu, 0x23b04u));
++	printf("POLARIS FNC: ao_word23b04 0x%08x -> 0x%08x\n",
++	    w, pwr_read(gmu, 0x23b04u));
+ 	printf("POLARIS FNC: done\n");
+ 	{
+ 		volatile uint64_t spin = 0;
