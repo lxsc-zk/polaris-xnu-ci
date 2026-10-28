@@ -1,0 +1,155 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 6637041..97bf3c9 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -11,6 +11,7 @@
+ 
+ extern bool polaris_touch_i2c_board(void);
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern vm_offset_t ml_static_vtop(vm_offset_t);
+ 
+ #define GPU_BLOB_COUNT 6u
+ #define GPU_PAGE       0x4000ull
+@@ -236,6 +237,118 @@ polaris_gfx_rail_on(vm_offset_t gmu, uint32_t gx_idx, uint32_t mx_idx)
+ 	return info;
+ }
+ 
++/* ---- HFI queue table handed to the GMU through the GPU SMMU ---- */
++#define POLARIS_SMMU_PA      0x5040000ull
++#define POLARIS_SMMU_LEN     0x10000ull
++#define POLARIS_HFI_SIZE     16384u
++#define POLARIS_HFI_QSZ      4096u
++#define POLARIS_HFI_QMAX     3u
++#define POLARIS_HFI_VA       0x40000000u
++#define POLARIS_HFI_TYPE(id, prio) \
++	((uint32_t)(id) | ((uint32_t)(prio) << 8))
++
++static uint8_t polaris_hfi_mem[POLARIS_HFI_SIZE] __attribute__((aligned(4096)));
++static uint8_t polaris_smmu_l1b[4096] __attribute__((aligned(4096)));
++static uint8_t polaris_smmu_l2b[4096] __attribute__((aligned(4096)));
++
++static void
++polaris_hfi_put(uint32_t off, uint32_t v)
++{
++	*(volatile uint32_t *)(polaris_hfi_mem + off) = v;
++}
++
++static void
++polaris_hfi_build(uint32_t qtbl_va)
++{
++	static const uint32_t ids[POLARIS_HFI_QMAX] = { 0u, 4u, 5u };
++	static const uint32_t prio[POLARIS_HFI_QMAX] = { 10u, 10u, 40u };
++	uint32_t i, off;
++
++	memset(polaris_hfi_mem, 0, sizeof(polaris_hfi_mem));
++	polaris_hfi_put(0x00u, 0u);
++	polaris_hfi_put(0x04u, 42u);
++	polaris_hfi_put(0x08u, 6u);
++	polaris_hfi_put(0x0cu, 12u);
++	polaris_hfi_put(0x10u, POLARIS_HFI_QMAX);
++	polaris_hfi_put(0x14u, POLARIS_HFI_QMAX);
++	for (i = 0; i < POLARIS_HFI_QMAX; i++) {
++		uint32_t b = 0x18u + i * 48u;
++		off = 0x18u + POLARIS_HFI_QMAX * 48u + i * (POLARIS_HFI_QSZ + 16u);
++		polaris_hfi_put(b + 0x00u, 0x1u);
++		polaris_hfi_put(b + 0x04u, qtbl_va + off);
++		polaris_hfi_put(b + 0x08u, POLARIS_HFI_TYPE(ids[i], prio[i]));
++		polaris_hfi_put(b + 0x0cu, POLARIS_HFI_QSZ >> 2);
++		polaris_hfi_put(b + 0x10u, 0u);
++		polaris_hfi_put(b + 0x14u, 0u);
++		polaris_hfi_put(b + 0x18u, 1u);
++		polaris_hfi_put(b + 0x1cu, 1u);
++		polaris_hfi_put(b + 0x20u, 1u);
++		polaris_hfi_put(b + 0x24u, 0u);
++		polaris_hfi_put(b + 0x28u, 0u);
++		polaris_hfi_put(b + 0x2cu, 0u);
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++}
++
++static uint32_t
++polaris_hfi_map(vm_offset_t smmu)
++{
++	uint64_t pa_l1, pa_l2, pa_buf, base, *l1, *l2;
++	uint32_t v, i;
++
++	pa_l1 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l1b);
++	pa_l2 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l2b);
++	pa_buf = (uint64_t)ml_static_vtop((vm_offset_t)polaris_hfi_mem);
++	if (!pa_l1 || !pa_l2 || !pa_buf ||
++	    (pa_l1 & 0xfffull) || (pa_l2 & 0xfffull)) {
++		printf("POLARIS HFI: bad pa l1=0x%llx l2=0x%llx buf=0x%llx\n",
++		    (unsigned long long)pa_l1, (unsigned long long)pa_l2,
++		    (unsigned long long)pa_buf);
++		return 0;
++	}
++	l1 = (uint64_t *)polaris_smmu_l1b;
++	l2 = (uint64_t *)polaris_smmu_l2b;
++	for (i = 0; i < 512u; i++) {
++		l1[i] = 0;
++		l2[i] = 0;
++	}
++	base = pa_buf & ~0x3fffffull;
++	for (i = 0; i < 2u; i++) {
++		uint64_t pa = base + (uint64_t)i * 0x200000ull;
++		l2[i] = (pa & 0x0000ffffffe00000ull) | (1ull << 10) |
++		    (3ull << 8) | 1ull;
++	}
++	l1[(POLARIS_HFI_VA >> 30) & 0x1ffu] =
++	    (pa_l2 & 0x0000fffffffff000ull) | 3ull;
++
++	v = *(volatile uint32_t *)(smmu + 0x48u);
++	*(volatile uint32_t *)(smmu + 0x48u) = v;
++	*(volatile uint32_t *)(smmu + 0x68u) = 0u;
++	*(volatile uint32_t *)(smmu + 0x6cu) = 0u;
++	v = *(volatile uint32_t *)(smmu + 0x00u);
++	v |= 0x0020u | (1u << 1) | (1u << 2) | (1u << 4) | (1u << 5) |
++	    (1u << 11) | (1u << 12);
++	v &= ~((1u << 0) | (1u << 13));
++	v &= ~(0x3u << 14);
++	v &= ~(0x3u << 22);
++	v |= (3u << 22);
++	*(volatile uint32_t *)(smmu + 0x00u) = v;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++
++	*(volatile uint32_t *)(smmu + 0x8010u) = 0u;
++	*(volatile uint64_t *)(smmu + 0x8020u) = pa_l1 & ~0xfffull;
++	*(volatile uint32_t *)(smmu + 0x8030u) = 0x10000351cu;
++	*(volatile uint32_t *)(smmu + 0x8038u) = 0x000044ffu;
++	*(volatile uint32_t *)(smmu + 0x803cu) = 0u;
++	*(volatile uint32_t *)(smmu + 0x8000u) = 0x00c010e7u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("POLARIS HFI: l1=0x%llx l2=0x%llx buf=0x%llx sctl=0x%08x\n",
++	    (unsigned long long)pa_l1, (unsigned long long)pa_l2,
++	    (unsigned long long)pa_buf,
++	    *(volatile uint32_t *)(smmu + 0x8000u));
++	return POLARIS_HFI_VA + (uint32_t)(pa_buf - base);
++}
++
+ /*
+  * Minimal GMU boot attempt with the correct A6xx addressing
+  * (absolute = 0x5000000 + (register define << 2)):
+@@ -379,7 +492,22 @@ polaris_gpu_gmu_boot(void)
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	*(volatile uint32_t *)(gpu + 0x14610u) = 0u;	/* HFI_QTBL_INFO = 0 */
++	if (optin == 35) {
++		vm_offset_t smmu2 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t qtbl2 = smmu2 ? polaris_hfi_map(smmu2) : 0u;
++		if (qtbl2) {
++			polaris_hfi_build(qtbl2);
++			*(volatile uint32_t *)(gpu + 0x14614u) = qtbl2;
++			*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
++			printf("POLARIS HFI: QTBL_ADDR=0x%08x INFO=1 start0=0x%08x\n",
++			    qtbl2,
++			    *(volatile uint32_t *)(polaris_hfi_mem + 0x1cu));
++		} else {
++			*(volatile uint32_t *)(gpu + 0x14610u) = 0u;
++		}
++	} else {
++		*(volatile uint32_t *)(gpu + 0x14610u) = 0u;
++	}
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	printf("POLARIS BOOT: bootcfg=0x%08x fwinit=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpu + 0x14004u),
