@@ -1,0 +1,206 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 5dbdd7c..55d5497 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2193,6 +2193,186 @@ polaris_gpu_cmddb(void)
+ 	}
+ }
+ 
++/*
++ * The GPU rail is the "vrm.gfx" RPMh resource (0x42700), not the gfx ARC.
++ * A VRM takes three commands at +0 (millivolts), +8 (mode) and +4 (enable).
++ * Read the voltage table from the cmd_db aux data and vote the top level.
++ */
++void
++polaris_gpu_vrm(void)
++{
++	int optin = 0;
++	vm_offset_t dict, db, tcs, gpucc, gcc, gmu;
++	uint32_t pa, size, i, j, h, cnt, ent, addr, aux_base, aux_off, aux_len;
++	uint32_t mv = 0, num = 0, v;
++	unsigned found = 0;
++	char name[9];
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 28) {
++		return;
++	}
++	dict = ml_io_map(0x0c3f000cu, 8);
++	tcs = ml_io_map(0x179e0d00ull, 0x3000u);
++	gpucc = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	gmu = ml_io_map(0x506a000ull, 0x30000);
++	if (!dict || !tcs || !gpucc || !gcc || !gmu) {
++		printf("POLARIS VRM: map failed\n");
++		return;
++	}
++	pa = pwr_read(dict, 0);
++	size = pwr_read(dict, 4);
++	db = ml_io_map(pa, size);
++	if (!db) {
++		printf("POLARIS VRM: db map failed\n");
++		return;
++	}
++	for (i = 0; i < 8 && !found; i++) {
++		h = 8u + 16u * i;
++		v = pwr_read(db, h + 4u);
++		cnt = (v >> 16) & 0xffffu;
++		if (cnt == 0 || cnt > 200) {
++			continue;
++		}
++		ent = 0x90u + ((pwr_read(db, h) >> 16) & 0xffffu);
++		aux_base = 0x90u + (v & 0xffffu);
++		for (j = 0; j < cnt; j++) {
++			uint32_t e = ent + 24u * j;
++			uint32_t w0 = pwr_read(db, e);
++			uint32_t w1 = pwr_read(db, e + 4u);
++			uint32_t w2 = pwr_read(db, e + 16u);
++			name[0] = (char)(w0 & 0xff);
++			name[1] = (char)((w0 >> 8) & 0xff);
++			name[2] = (char)((w0 >> 16) & 0xff);
++			name[3] = (char)((w0 >> 24) & 0xff);
++			name[4] = (char)(w1 & 0xff);
++			name[5] = (char)((w1 >> 8) & 0xff);
++			name[6] = (char)((w1 >> 16) & 0xff);
++			name[7] = (char)((w1 >> 24) & 0xff);
++			name[8] = 0;
++			if (name[0] != 'v' || name[1] != 'r' || name[2] != 'm' ||
++			    name[3] != '.' || name[4] != 'g' || name[5] != 'f' ||
++			    name[6] != 'x') {
++				continue;
++			}
++			addr = w2;
++			aux_len = (pwr_read(db, e + 20u) >> 16) & 0xffffu;
++			aux_off = pwr_read(db, e + 20u) & 0xffffu;
++			printf("POLARIS VRM: vrm.gfx addr=0x%08x aux_len=%u aux_off=0x%x\n",
++			    addr, aux_len, aux_off);
++			num = aux_len / 2u;
++			if (num > 20) {
++				num = 20;
++			}
++			for (uint32_t k = 0; k < num; k++) {
++				uint32_t off = aux_base + aux_off + 2u * k;
++				uint32_t w = pwr_read(db, off & ~3u);
++				uint32_t val = (off & 2u) ? (w >> 16) : (w & 0xffffu);
++				printf("POLARIS VRM: lvl[%u]=%u mV\n", k, val);
++				if (val > mv && val < 2000u) {
++					mv = val;
++				}
++			}
++			found = 1;
++			break;
++		}
++	}
++	if (!found) {
++		printf("POLARIS VRM: vrm.gfx not found\n");
++		return;
++	}
++	printf("POLARIS VRM: voting %u mV mode=7 enable=1\n", mv);
++	for (i = 0; i < 3; i++) {
++		static const uint32_t offs[3] = { 0, 8, 4 };
++		uint32_t vals[3];
++		uint32_t b = 0, cst = 0, k;
++		int ok = 0;
++		vals[0] = mv;
++		vals[1] = 7;
++		vals[2] = 1;
++		for (k = 0; k < 3; k++) {
++			pwr_write(tcs, b + k * 0x14u + 0x30u, 8u | (1u << 8) | (1u << 16));
++			pwr_write(tcs, b + k * 0x14u + 0x34u, addr + offs[k]);
++			pwr_write(tcs, b + k * 0x14u + 0x38u, vals[k]);
++		}
++		pwr_write(tcs, b + 0x10u, 7u);
++		pwr_write(tcs, b + 0x1cu, 7u);
++		pwr_write(tcs, b + 0x14u, 0u);
++		pwr_write(tcs, b + 0x14u, (1u << 16));
++		pwr_delay();
++		pwr_write(tcs, b + 0x14u, (1u << 16) | (1u << 24));
++		for (k = 0; k < 20000; k++) {
++			uint32_t comp = 1;
++			uint32_t c;
++			for (c = 0; c < 3; c++) {
++				cst = pwr_read(tcs, b + c * 0x14u + 0x3cu);
++				if ((cst & 0x00010100u) != 0x00010100u) {
++					comp = 0;
++				}
++			}
++			if (comp) {
++				ok = 1;
++				break;
++			}
++			pwr_delay();
++		}
++		printf("POLARIS VRM: vote status=0x%08x polls=%u %s\n", cst, k,
++		    ok ? "OK" : "TIMEOUT");
++		break;
++	}
++	/* now bring the domain up */
++	v = pwr_read(gpucc, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(gpucc, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(gpucc, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gpucc, 0x101cu, 0x00000002u);
++	pwr_delay();
++	pwr_write(gpucc, 0x1020u, 0x00000501u);
++	pwr_delay();
++	v = pwr_read(gpucc, 0x1054u);
++	pwr_write(gpucc, 0x1054u, v | 1u);
++	pwr_delay();
++	printf("POLARIS VRM: branch1054=0x%08x\n", pwr_read(gpucc, 0x1054u));
++	v = pwr_read(gpucc, GDSC_GX);
++	pwr_write(gpucc, GDSC_GX, v & ~1u);
++	for (i = 0; i < 5000; i++) {
++		pwr_delay();
++		v = pwr_read(gpucc, GDSC_GX);
++		if (v & (1u << 31)) {
++			break;
++		}
++	}
++	printf("POLARIS VRM: GX=0x%08x polls=%u %s\n", v, i,
++	    (v & (1u << 31)) ? "ON" : "OFF");
++	pwr_write(gmu, 0x1f9ccu, 0xdeadbeefu);
++	pwr_delay();
++	v = pwr_read(gmu, 0x1f9ccu);
++	printf("POLARIS VRM: general7=0x%08x %s\n", v,
++	    (v == 0xdeadbeefu) ? "OK" : "FAIL");
++	pwr_write(gmu, 0x1f9ccu, 0u);
++	printf("POLARIS VRM: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 73082c5..3d0d317 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -587,6 +587,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_cmddb(void);
+ 		polaris_gpu_cmddb();
+ 	}
++	{
++		extern void polaris_gpu_vrm(void);
++		polaris_gpu_vrm();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_window(void);
+ 		polaris_gpu_gmu_window();
