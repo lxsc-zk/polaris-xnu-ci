@@ -1,0 +1,31 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 0a85349..91fc805 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2560,14 +2560,25 @@ polaris_gpu_arc(void)
+ 	v = pwr_read(gcc, 0x52004u);
+ 	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
+ 	pwr_delay();
++	/* clk-rcg2: root enable, program CFG, then pulse UPDATE and wait for it */
+ 	pwr_write(gpucc, 0x101cu, 0x00000002u);
+ 	pwr_delay();
+ 	pwr_write(gpucc, 0x1020u, 0x00000501u);
+ 	pwr_delay();
++	pwr_write(gpucc, 0x101cu, 0x00000003u);
++	for (i = 0; i < 1000; i++) {
++		pwr_delay();
++		if (!(pwr_read(gpucc, 0x101cu) & 1u)) {
++			break;
++		}
++	}
++	printf("POLARIS ARC: rcg101c=0x%08x cfg1020=0x%08x upd_polls=%u\n",
++	    pwr_read(gpucc, 0x101cu), pwr_read(gpucc, 0x1020u), i);
+ 	v = pwr_read(gpucc, 0x1054u);
+ 	pwr_write(gpucc, 0x1054u, v | 1u);
+ 	pwr_delay();
+-	printf("POLARIS ARC: branch1054=0x%08x\n", pwr_read(gpucc, 0x1054u));
++	printf("POLARIS ARC: branch1054 0x%08x -> 0x%08x\n", v,
++	    pwr_read(gpucc, 0x1054u));
+ 	v = pwr_read(gpucc, GDSC_GX);
+ 	pwr_write(gpucc, GDSC_GX, v & ~1u);
+ 	for (i = 0; i < 5000; i++) {
