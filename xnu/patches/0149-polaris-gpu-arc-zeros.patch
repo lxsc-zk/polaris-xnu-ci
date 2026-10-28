@@ -1,0 +1,35 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index afafce3..987362d 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2427,15 +2427,22 @@ polaris_arc_lookup(vm_offset_t db, uint32_t pa, uint32_t size,
+ 			*addr = pwr_read(db, e + 16u);
+ 			al = pwr_read(db, e + 20u) & 0xffffu;
+ 			ao = (pwr_read(db, e + 20u) >> 16) & 0xffffu;
+-			for (k = 0; k < al / 2u && k < 20u; k++) {
+-				uint32_t off = aux_base + ao + 2u * k;
+-				uint32_t wv = pwr_read(db, off & ~3u);
+-				uint32_t val = (off & 2u) ? (wv >> 16) : (wv & 0xffffu);
+-				if (val == 0) {
+-					break;
++			{
++				uint32_t zeros = 0;
++				for (k = 0; k < al / 2u && k < 20u; k++) {
++					uint32_t off = aux_base + ao + 2u * k;
++					uint32_t wv = pwr_read(db, off & ~3u);
++					uint32_t val = (off & 2u) ? (wv >> 16) : (wv & 0xffffu);
++					if (val == 0) {
++						if (valid != 0 && ++zeros > 3u) {
++							break;
++						}
++						continue;
++					}
++					zeros = 0;
++					best = val;
++					valid++;
+ 				}
+-				best = val;
+-				valid++;
+ 			}
+ 			if (!valid) {
+ 				return -1;
