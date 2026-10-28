@@ -1,0 +1,190 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 70e6581..8bbeaa2 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -1960,6 +1960,170 @@ polaris_gpu_rpmh(void)
+ 	}
+ }
+ 
++/*
++ * RPMh write using the geometry and trigger protocol that the existing
++ * sweet_rpmh.c client already validated on this platform:
++ *   RSC 0x18220000, TCS 0x18220d00, cmd-db via locator 0x0c3f000c,
++ *   CONTROL must go AMC_EN then AMC_EN|TRIGGER, completion is CMD_STATUS.
++ */
++#define P_RSC_PA	0x18220000ull
++#define P_TCS_PA	0x18220d00ull
++#define P_TCS_SIZE	0x3000u
++#define P_DICT_PA	0x0c3f000cu
++#define P_STRIDE	0x2a0u
++#define P_CMD_STRIDE	0x14u
++#define P_IRQ_EN	0x00u
++#define P_IRQ_STATUS	0x04u
++#define P_IRQ_CLEAR	0x08u
++#define P_WAIT		0x10u
++#define P_CONTROL	0x14u
++#define P_STATUS	0x18u
++#define P_ENABLE	0x1cu
++#define P_MSGID		0x30u
++#define P_ADDR		0x34u
++#define P_DATA		0x38u
++#define P_CMD_STATUS	0x3cu
++#define P_AMC_EN	(1u << 16)
++#define P_TRIGGER	(1u << 24)
++#define P_ISSUED	(1u << 8)
++#define P_COMPLETE	(1u << 16)
++#define P_MSGID_VAL	(8u | (1u << 8) | (1u << 16))
++
++static int
++polaris_rpmh_level(vm_offset_t tcs, vm_offset_t rsc, uint32_t addr,
++    uint32_t level, const char *what)
++{
++	uint32_t b = 0, irq_en, st, cst = 0, irq = 0, i;
++	int ok = 0;
++
++	st = pwr_read(tcs, b + P_STATUS);
++	irq_en = pwr_read(tcs, P_IRQ_EN);
++	printf("POLARIS RP2: %s tcs0 status=0x%08x control=0x%08x en=0x%08x irq_en=0x%08x\n",
++	    what, st, pwr_read(tcs, b + P_CONTROL),
++	    pwr_read(tcs, b + P_ENABLE), irq_en);
++	if (st == 0 || st == 0xffffffffu) {
++		printf("POLARIS RP2: %s TCS0 not idle\n", what);
++		return -1;
++	}
++	/* mask this TCS' source while we fill it */
++	pwr_write(tcs, P_IRQ_EN, irq_en & ~1u);
++	pwr_write(tcs, b + P_MSGID, P_MSGID_VAL);
++	pwr_write(tcs, b + P_ADDR, addr);
++	pwr_write(tcs, b + P_DATA, level);
++	pwr_write(tcs, b + P_WAIT, 1u);
++	pwr_write(tcs, b + P_ENABLE, 1u);
++	pwr_write(tcs, b + P_CONTROL, 0u);
++	pwr_write(tcs, b + P_CONTROL, P_AMC_EN);
++	pwr_delay();
++	pwr_write(tcs, b + P_CONTROL, P_AMC_EN | P_TRIGGER);
++	for (i = 0; i < 20000; i++) {
++		irq = pwr_read(tcs, P_IRQ_STATUS);
++		cst = pwr_read(tcs, b + P_CMD_STATUS);
++		if (cst != 0xffffffffu &&
++		    (cst & (P_ISSUED | P_COMPLETE)) == (P_ISSUED | P_COMPLETE)) {
++			ok = 1;
++			break;
++		}
++		pwr_delay();
++	}
++	printf("POLARIS RP2: %s addr=0x%08x level=%u irq=0x%08x cmd_status=0x%08x polls=%u %s\n",
++	    what, addr, level, irq, cst, i, ok ? "OK" : "TIMEOUT");
++	pwr_write(tcs, P_IRQ_CLEAR, 0xffffffffu);
++	(void)rsc;
++	return ok ? 0 : -1;
++}
++
++void
++polaris_gpu_rpmh2(void)
++{
++	int optin = 0;
++	vm_offset_t gpucc, gcc, tcs, rsc, dict, gmu;
++	uint32_t v, i, db_pa = 0, db_size = 0;
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 26) {
++		return;
++	}
++	rsc = ml_io_map(P_RSC_PA, 0x100);
++	tcs = ml_io_map(P_TCS_PA, P_TCS_SIZE);
++	dict = ml_io_map(P_DICT_PA, 8);
++	gpucc = ml_io_map(GPUCC_PA, GPUCC_LEN);
++	gcc = ml_io_map(GCC_PA, GCC_LEN);
++	gmu = ml_io_map(0x506a000ull, 0x30000);
++	if (!rsc || !tcs || !dict || !gpucc || !gcc || !gmu) {
++		printf("POLARIS RP2: map failed\n");
++		return;
++	}
++	printf("POLARIS RP2: rsc id=0x%08x solver=0x%08x config=0x%08x\n",
++	    pwr_read(rsc, 0x0u), pwr_read(rsc, 0x4u), pwr_read(rsc, 0xcu));
++	db_pa = pwr_read(dict, 0);
++	db_size = pwr_read(dict, 4);
++	printf("POLARIS RP2: cmd_db locator pa=0x%08x size=0x%08x\n", db_pa, db_size);
++	if (db_pa != 0 && db_size > 0x90 && db_size < 0x100000) {
++		vm_offset_t db = ml_io_map((vm_offset_t)db_pa, db_size);
++		if (db) {
++			printf("POLARIS RP2: cmd_db magic=0x%08x ver=0x%08x\n",
++			    pwr_read(db, 4u), pwr_read(db, 0u));
++		} else {
++			printf("POLARIS RP2: cmd_db map failed\n");
++		}
++	}
++	/* vote CX/MX first, then the GPU rail, all at the top level */
++	polaris_rpmh_level(tcs, rsc, 0x00030010u, 15u, "mx.lvl");
++	polaris_rpmh_level(tcs, rsc, 0x00030000u, 15u, "cx.lvl");
++	polaris_rpmh_level(tcs, rsc, 0x00030050u, 15u, "gfx.lvl");
++	pwr_delay();
++	v = pwr_read(gpucc, GDSC_CX);
++	if (!(v & (1u << 31))) {
++		pwr_write(gpucc, GDSC_CX, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			v = pwr_read(gpucc, GDSC_CX);
++			if (v & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	v = pwr_read(gcc, 0x52004u);
++	pwr_write(gcc, 0x52004u, v | (1u << 15) | (1u << 16));
++	pwr_delay();
++	pwr_write(gpucc, 0x101cu, 0x00000002u);
++	pwr_delay();
++	pwr_write(gpucc, 0x1020u, 0x00000501u);
++	pwr_delay();
++	v = pwr_read(gpucc, 0x1054u);
++	pwr_write(gpucc, 0x1054u, v | 1u);
++	pwr_delay();
++	v = pwr_read(gpucc, GDSC_GX);
++	pwr_write(gpucc, GDSC_GX, v & ~1u);
++	for (i = 0; i < 5000; i++) {
++		pwr_delay();
++		v = pwr_read(gpucc, GDSC_GX);
++		if (v & (1u << 31)) {
++			break;
++		}
++	}
++	printf("POLARIS RP2: branch1054=0x%08x CX=0x%08x GX=0x%08x %s\n",
++	    pwr_read(gpucc, 0x1054u), pwr_read(gpucc, GDSC_CX), v,
++	    (v & (1u << 31)) ? "ON" : "OFF");
++	pwr_write(gmu, 0x1f9ccu, 0xdeadbeefu);
++	pwr_delay();
++	v = pwr_read(gmu, 0x1f9ccu);
++	printf("POLARIS RP2: general7=0x%08x %s\n", v,
++	    (v == 0xdeadbeefu) ? "OK" : "FAIL");
++	pwr_write(gmu, 0x1f9ccu, 0u);
++	printf("POLARIS RP2: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 4cacd4e..4e26af0 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -579,6 +579,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_rpmh(void);
+ 		polaris_gpu_rpmh();
+ 	}
++	{
++		extern void polaris_gpu_rpmh2(void);
++		polaris_gpu_rpmh2();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_window(void);
+ 		polaris_gpu_gmu_window();
