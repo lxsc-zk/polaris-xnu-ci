@@ -1,0 +1,96 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 0f924ab..c79665a 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2698,6 +2698,76 @@ polaris_gpu_gmu4clk(void)
+ 	}
+ }
+ 
++/* Dump cmd_db entries for the BCM/ARC slaves (3 and 4). */
++void
++polaris_gpu_bcm(void)
++{
++	int optin = 0;
++	vm_offset_t dict, db;
++	uint32_t pa, size, i, j, h, cnt, ent, addr;
++	char name[9];
++
++	if (!polaris_touch_i2c_board()) {
++		return;
++	}
++	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
++	if (optin != 31) {
++		return;
++	}
++	dict = ml_io_map(0x0c3f000cu, 8);
++	if (!dict) {
++		printf("POLARIS BCM: dict map failed\n");
++		return;
++	}
++	pa = pwr_read(dict, 0);
++	size = pwr_read(dict, 4);
++	db = ml_io_map(pa, size);
++	if (!db) {
++		printf("POLARIS BCM: db map failed\n");
++		return;
++	}
++	for (i = 0; i < 8; i++) {
++		uint32_t w;
++		h = 8u + 16u * i;
++		w = pwr_read(db, h + 4u);
++		cnt = (w >> 16) & 0xffffu;
++		if (cnt == 0 || cnt > 200) {
++			continue;
++		}
++		if (i < 3) {
++			printf("POLARIS BCM: slave %u cnt=%u (skipped)\n", i, cnt);
++			continue;
++		}
++		ent = 0x90u + ((pwr_read(db, h) >> 16) & 0xffffu);
++		printf("POLARIS BCM: slave %u cnt=%u\n", i, cnt);
++		for (j = 0; j < cnt && j < 24u; j++) {
++			uint32_t e = ent + 24u * j;
++			uint32_t w0 = pwr_read(db, e);
++			uint32_t w1 = pwr_read(db, e + 4u);
++			addr = pwr_read(db, e + 16u);
++			name[0] = (char)(w0 & 0xff);
++			name[1] = (char)((w0 >> 8) & 0xff);
++			name[2] = (char)((w0 >> 16) & 0xff);
++			name[3] = (char)((w0 >> 24) & 0xff);
++			name[4] = (char)(w1 & 0xff);
++			name[5] = (char)((w1 >> 8) & 0xff);
++			name[6] = (char)((w1 >> 16) & 0xff);
++			name[7] = (char)((w1 >> 24) & 0xff);
++			name[8] = 0;
++			printf("POLARIS BCM: [%u.%u] '%s' addr=0x%08x\n",
++			    i, j, name, addr);
++		}
++	}
++	printf("POLARIS BCM: done\n");
++	{
++		volatile uint64_t spin = 0;
++		while (spin < 20000000000ull) {
++			spin++;
++			__asm__ __volatile__("nop");
++		}
++	}
++}
++
+ void
+ polaris_gpu_smmu_clocks(void)
+ {
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index 08cbff4..f053981 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -599,6 +599,10 @@ bsd_init(void)
+ 		extern void polaris_gpu_gmu4clk(void);
+ 		polaris_gpu_gmu4clk();
+ 	}
++	{
++		extern void polaris_gpu_bcm(void);
++		polaris_gpu_bcm();
++	}
+ 	{
+ 		extern void polaris_gpu_gmu_window(void);
+ 		polaris_gpu_gmu_window();
