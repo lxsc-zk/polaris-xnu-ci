@@ -1,0 +1,17 @@
+diff --git a/bsd/dev/polaris_gpu_power.c b/bsd/dev/polaris_gpu_power.c
+index 987362d..e7ef3e1 100644
+--- a/bsd/dev/polaris_gpu_power.c
++++ b/bsd/dev/polaris_gpu_power.c
+@@ -2447,9 +2447,9 @@ polaris_arc_lookup(vm_offset_t db, uint32_t pa, uint32_t size,
+ 			if (!valid) {
+ 				return -1;
+ 			}
+-			*vlvl = best;
+-			printf("POLARIS ARC: %s addr=0x%08x levels=%u top=0x%x\n",
+-			    key7, *addr, valid, best);
++			*vlvl = valid - 1u;	/* RPMh wants the level index */
++			printf("POLARIS ARC: %s addr=0x%08x levels=%u top=0x%x index=%u\n",
++			    key7, *addr, valid, best, *vlvl);
+ 			return 0;
+ 		}
+ 	}
