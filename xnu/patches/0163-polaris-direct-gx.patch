@@ -1,0 +1,43 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index c8f70a3..620a389 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -392,6 +392,38 @@ polaris_gpu_gmu_boot(void)
+ 		    *(volatile uint32_t *)(gpu + 0x24c14u),
+ 		    *(volatile uint32_t *)(gpu + 0x14648u));
+ 	}
++	if (optin == 35) {
++		/* direct AP attempt: clear SW_COLLAPSE, set EN_FEW=8, retain bits */
++		uint32_t gv = *(volatile uint32_t *)(gpucc + 0x100cu);
++		*(volatile uint32_t *)(gpucc + 0x100cu) =
++		    (gv & ~1u) | 0x00288000u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		for (i = 0; i < 200000u; i++) {
++			gv = *(volatile uint32_t *)(gpucc + 0x100cu);
++			if (gv & (1u << 31)) {
++				break;
++			}
++			__asm__ __volatile__("nop");
++		}
++		printf("POLARIS BOOT: direct GX=0x%08x polls=%u %s\n", gv, i,
++		    (gv & (1u << 31)) ? "ON" : "OFF");
++		printf("POLARIS BOOT: hw_ctrl=0x%08x\n",
++		    *(volatile uint32_t *)(gpucc + 0x1540u));
++		/* gx_gfx3d clock source + branch */
++		*(volatile uint32_t *)(gpucc + 0x101cu) = 0x00000002u;
++		*(volatile uint32_t *)(gpucc + 0x1020u) = 0x00000501u;
++		*(volatile uint32_t *)(gpucc + 0x101cu) = 0x00000003u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		gv = *(volatile uint32_t *)(gpucc + 0x1054u);
++		*(volatile uint32_t *)(gpucc + 0x1054u) =
++		    (gv & ~(1u << 31)) | 1u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS BOOT: rcg101c=0x%08x cfg=0x%08x br1054 0x%08x->0x%08x\n",
++		    *(volatile uint32_t *)(gpucc + 0x101cu),
++		    *(volatile uint32_t *)(gpucc + 0x1020u),
++		    gv, *(volatile uint32_t *)(gpucc + 0x1054u));
++	}
++
+ 	printf("POLARIS BOOT: GX=0x%08x CX=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpucc + 0x100cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x106cu));
