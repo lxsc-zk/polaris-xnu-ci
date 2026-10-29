@@ -1,0 +1,74 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 8db9c39..e51a30e 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -493,7 +493,7 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+-	    optin != 38) {
++	    optin != 38 && optin != 39) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -647,6 +647,60 @@ polaris_gpu_gmu_boot(void)
+ 		    pa_tbl, pa_q[0], pa_q[1], pa_q[2]);
+ 	}
+ 
++	/* ---- optin 39: can context bank 5 (the bank the firmware bound SID3 to)
++	 * be reached at all?  Each read is preceded by its own marker so a hang
++	 * still identifies the offending register. ---- */
++	if (optin == 39) {
++		vm_offset_t s5 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t ttbr0 = 0u, ttbcr = 0u, cidr = 0u, sctlr = 0u, fsr = 0u;
++
++		if (!s5) {
++			printf("POLARIS CB5: smmu map failed\n");
++		} else {
++			printf("POLARIS CB5: cb0 sctlr=0x%08x ttbr0=0x%08x\n",
++			    *(volatile uint32_t *)(s5 + 0x8000u),
++			    *(volatile uint32_t *)(s5 + 0x8020u));
++			printf("POLARIS CB5: read 0xd020\n");
++			ttbr0 = *(volatile uint32_t *)(s5 + 0xd020u);
++			printf("POLARIS CB5: [0xd020]=0x%08x (TTBR0)\n", ttbr0);
++			printf("POLARIS CB5: read 0xd030\n");
++			ttbcr = *(volatile uint32_t *)(s5 + 0xd030u);
++			printf("POLARIS CB5: [0xd030]=0x%08x (TTBCR)\n", ttbcr);
++			printf("POLARIS CB5: read 0xd034\n");
++			cidr = *(volatile uint32_t *)(s5 + 0xd034u);
++			printf("POLARIS CB5: [0xd034]=0x%08x (CONTEXTIDR)\n", cidr);
++			printf("POLARIS CB5: read 0xd000\n");
++			sctlr = *(volatile uint32_t *)(s5 + 0xd000u);
++			printf("POLARIS CB5: [0xd000]=0x%08x (SCTLR)\n", sctlr);
++			printf("POLARIS CB5: read 0xd008\n");
++			fsr = *(volatile uint32_t *)(s5 + 0xd008u);
++			printf("POLARIS CB5: [0xd008]=0x%08x (FSR)\n", fsr);
++			if (!(sctlr & 1u)) {
++				printf("POLARIS CB5: write test ttbcr=0\n");
++				*(volatile uint32_t *)(s5 + 0xd030u) = 0u;
++				__asm__ __volatile__("dsb sy" ::: "memory");
++				printf("POLARIS CB5: ttbcr readback=0x%08x\n",
++				    *(volatile uint32_t *)(s5 + 0xd030u));
++				printf("POLARIS CB5: write test sctlr=0\n");
++				*(volatile uint32_t *)(s5 + 0xd000u) = 0u;
++				__asm__ __volatile__("dsb sy" ::: "memory");
++				printf("POLARIS CB5: sctlr readback=0x%08x\n",
++				    *(volatile uint32_t *)(s5 + 0xd000u));
++			} else {
++				printf("POLARIS CB5: SCTLR.M=1, skip write test\n");
++			}
++		}
++		printf("POLARIS CB5: done\n");
++		{
++			volatile uint64_t spin = 0;
++			while (spin < 20000000000ull) {
++				spin++;
++				__asm__ __volatile__("nop");
++			}
++		}
++		return;
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
