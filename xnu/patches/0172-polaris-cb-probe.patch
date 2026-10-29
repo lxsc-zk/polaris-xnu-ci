@@ -1,8 +1,18 @@
 diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
-index f2d433a..ef61f74 100644
+index f2d433a..ed5f797 100644
 --- a/bsd/dev/polaris_gpu_diag.c
 +++ b/bsd/dev/polaris_gpu_diag.c
-@@ -294,17 +294,25 @@ static uint32_t
+@@ -247,6 +247,9 @@ polaris_gfx_rail_on(vm_offset_t gmu, uint32_t gx_idx, uint32_t mx_idx)
+ #define POLARIS_HFI_TYPE(id, prio) \
+ 	((uint32_t)(id) | ((uint32_t)(prio) << 8))
+ 
++static int polaris_cb_ok[6] = { -1, -1, -1, -1, -1, -1 };
++static uint32_t polaris_cb_sctl[6];
++
+ static uint8_t polaris_hfi_mem[POLARIS_HFI_SIZE] __attribute__((aligned(4096)));
+ static uint8_t polaris_smmu_l1b[4096] __attribute__((aligned(4096)));
+ static uint8_t polaris_smmu_l2b[4096] __attribute__((aligned(4096)));
+@@ -294,17 +297,24 @@ static uint32_t
  polaris_hfi_map(vm_offset_t smmu)
  {
  	uint64_t pa_l1, pa_l2, pa_buf, base, *l1, *l2;
@@ -11,7 +21,6 @@ index f2d433a..ef61f74 100644
 +	uint32_t v, i, idx, cb, cb_off;
 +	static const uint32_t sids[3] = { 3u, 4u, 5u };
 +
-+	/* prefer CB5, then CB4, then CB0 */
 +	cb = 0u;
 +	for (i = 0; i < 6u; i++) {
 +		if (polaris_cb_ok[i] == 1 && i >= cb) {
@@ -33,7 +42,7 @@ index f2d433a..ef61f74 100644
  		return 0;
  	}
  	l1 = (uint64_t *)polaris_smmu_l1b;
-@@ -326,7 +334,6 @@ polaris_hfi_map(vm_offset_t smmu)
+@@ -326,7 +336,6 @@ polaris_hfi_map(vm_offset_t smmu)
  	l1[(POLARIS_HFI_VA >> 30) & 0x1ffu] =
  	    (pa_l2 & 0x0000fffffffff000ull) | 3ull;
  
@@ -41,7 +50,7 @@ index f2d433a..ef61f74 100644
  	v = *(volatile uint32_t *)(smmu + 0x00u);
  	v |= 0x0020u | (1u << 1) | (1u << 2) | (1u << 4) | (1u << 5) |
  	    (1u << 11) | (1u << 12);
-@@ -337,27 +344,53 @@ polaris_hfi_map(vm_offset_t smmu)
+@@ -337,27 +346,52 @@ polaris_hfi_map(vm_offset_t smmu)
  	*(volatile uint32_t *)(smmu + 0x00u) = v;
  	__asm__ __volatile__("dsb sy" ::: "memory");
  
@@ -67,10 +76,7 @@ index f2d433a..ef61f74 100644
  	__asm__ __volatile__("dsb sy" ::: "memory");
  	*(volatile uint32_t *)(smmu + cb_off + 0x00u) = 0x00c011e7u;
 +	__asm__ __volatile__("dsb sy" ::: "memory");
- 
--	printf("POLARIS HFI: cb5 after  sctl=0x%08x ttbr0=0x%llx va=0x%08x\n",
--	    *(volatile uint32_t *)(smmu + cb_off + 0x00u),
-+	/* route every GMU-related stream at the chosen CB */
++
 +	for (i = 0; i < 3u; i++) {
 +		uint32_t slot = 0xffffffffu, j;
 +		for (j = 0; j < 7u; j++) {
@@ -100,13 +106,15 @@ index f2d433a..ef61f74 100644
 +		}
 +	}
 +	__asm__ __volatile__("dsb sy" ::: "memory");
-+
+ 
+-	printf("POLARIS HFI: cb5 after  sctl=0x%08x ttbr0=0x%llx va=0x%08x\n",
+-	    *(volatile uint32_t *)(smmu + cb_off + 0x00u),
 +	printf("POLARIS HFI: cb%u sctl=0x%08x ttbr0=0x%llx va=0x%08x\n",
 +	    cb, *(volatile uint32_t *)(smmu + cb_off + 0x00u),
  	    (unsigned long long)*(volatile uint64_t *)(smmu + cb_off + 0x20u),
  	    POLARIS_HFI_VA);
  	return POLARIS_HFI_VA + (uint32_t)(pa_buf - base);
-@@ -374,13 +407,38 @@ polaris_smmu_dump(vm_offset_t smmu)
+@@ -374,13 +408,34 @@ polaris_smmu_dump(vm_offset_t smmu)
  	    *(volatile uint32_t *)(smmu + 0x24u),
  	    *(volatile uint32_t *)(smmu + 0x28u),
  	    *(volatile uint32_t *)(smmu + 0x00u));
@@ -118,12 +126,8 @@ index f2d433a..ef61f74 100644
  	}
  }
  
-+/* Which context banks actually respond; -1 = not yet probed. */
-+static int polaris_cb_ok[6] = { -1, -1, -1, -1, -1, -1 };
-+static uint32_t polaris_cb_sctl[6];
-+
-+/* Probe CB0..CB5 read-only. A marker is printed before each touch so a hang
-+ * still tells us which context bank is out of range. */
++/* Probe CB0..CB5 read-only. A marker precedes each touch so a hang still
++ * reveals which context bank is out of range. */
 +static void
 +polaris_cb_probe(vm_offset_t smmu)
 +{
@@ -146,7 +150,7 @@ index f2d433a..ef61f74 100644
  /*
   * Minimal GMU boot attempt with the correct A6xx addressing
   * (absolute = 0x5000000 + (register define << 2)):
-@@ -462,6 +520,7 @@ polaris_gpu_gmu_boot(void)
+@@ -462,6 +517,7 @@ polaris_gpu_gmu_boot(void)
  		vm_offset_t s0 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
  		if (s0) {
  			polaris_smmu_dump(s0);
