@@ -1,0 +1,45 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 8fac82f..0303848 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -377,6 +377,32 @@ polaris_cb_probe(vm_offset_t smmu)
+ 	printf("POLARIS CB: probe done\n");
+ }
+ 
++/* Read the same logical register through the plain and the +0x400 aliases.
++ * A marker precedes every read so a hang still names the offending offset.
++ * Secure SMMU instances shift every global register by 0x400:
++ *   sCR0 0x000 -> nsCR0 0x400, sGFSR 0x048 -> 0x448,
++ *   SMR(n) 0x800+4n -> 0xC00+4n, S2CR(n) 0xC00+4n -> 0x1000+4n. */
++static void
++polaris_smmu_alias(vm_offset_t smmu)
++{
++	static const uint32_t offs[] = {
++		0x000u, 0x400u,
++		0x048u, 0x448u,
++		0x800u, 0xc00u,
++		0x814u, 0xc14u,
++		0x1000u, 0x1014u,
++	};
++	uint32_t i;
++
++	printf("POLARIS ALIAS: start\n");
++	for (i = 0; i < sizeof(offs) / sizeof(offs[0]); i++) {
++		printf("POLARIS ALIAS: read 0x%03x\n", offs[i]);
++		printf("POLARIS ALIAS: [0x%03x]=0x%08x\n", offs[i],
++		    *(volatile uint32_t *)(smmu + offs[i]));
++	}
++	printf("POLARIS ALIAS: done\n");
++}
++
+ /*
+  * Minimal GMU boot attempt with the correct A6xx addressing
+  * (absolute = 0x5000000 + (register define << 2)):
+@@ -457,6 +483,7 @@ polaris_gpu_gmu_boot(void)
+ 	if (optin == 35) {
+ 		vm_offset_t s0 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		if (s0) {
++			polaris_smmu_alias(s0);
+ 			polaris_smmu_dump(s0);
+ 			polaris_cb_probe(s0);
+ 		}
