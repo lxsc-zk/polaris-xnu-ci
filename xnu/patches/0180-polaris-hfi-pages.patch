@@ -1,0 +1,146 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index e672177..5dea427 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -260,6 +260,76 @@ polaris_hfi_put(uint32_t off, uint32_t v)
+ 	*(volatile uint32_t *)(polaris_hfi_mem + off) = v;
+ }
+ 
++/* Page-granular HFI: the table and each queue live in their own 4 KiB page,
++ * so no 16 KiB physical contiguity is required. Each queue advertises its own
++ * physical start address, which is what the GMU sees in SMMU bypass mode. */
++static uint8_t polaris_hfi_tbl[4096] __attribute__((aligned(4096)));
++static uint8_t polaris_hfi_q[3][4096] __attribute__((aligned(4096)));
++
++static void
++polaris_hfi_build_pages(const uint32_t *pa_q)
++{
++	static const uint32_t ids[3] = { 0u, 4u, 5u };
++	static const uint32_t prio[3] = { 10u, 10u, 40u };
++	uint32_t i, b;
++
++	for (i = 0; i < 4096u; i += 4u) {
++		*(volatile uint32_t *)(polaris_hfi_tbl + i) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_q[0] + i) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_q[1] + i) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_q[2] + i) = 0u;
++	}
++
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x00u) = 0u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x04u) = 42u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x08u) = 6u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x0cu) = 12u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x10u) = 3u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x14u) = 3u;
++
++	for (i = 0; i < 3u; i++) {
++		b = 0x18u + i * 48u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x00u) = pa_q[i];
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x04u) =
++		    (ids[i] & 0xffu) | ((prio[i] & 0xffu) << 8);
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x08u) = 1u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x0cu) = 1024u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x10u) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x14u) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x18u) = 1u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x1cu) = 1u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x20u) = 1u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x24u) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x28u) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x2cu) = 0u;
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++}
++
++/* Put every GPU/GMU stream into a BYPASS slot.  S2CR[0..4] already read back
++ * 0x000200ff (TYPE=2 bypass) and are not writable, so we only touch SMR. */
++static void
++polaris_smmu_bypass(vm_offset_t smmu)
++{
++	static const uint32_t slot_sid[5] = { 3u, 4u, 5u, 0u, 1u };
++	uint32_t i;
++
++	*(volatile uint32_t *)(smmu + 0x800u + 5u * 4u) = 0u;
++	*(volatile uint32_t *)(smmu + 0x800u + 6u * 4u) = 0u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++
++	for (i = 0; i < 5u; i++) {
++		*(volatile uint32_t *)(smmu + 0x800u + i * 4u) =
++		    0x80000000u | slot_sid[i];
++		__asm__ __volatile__("dsb sy" ::: "memory");
++	}
++	for (i = 0; i < 7u; i++) {
++		printf("POLARIS BYPASS: smr%u=0x%08x s2cr%u=0x%08x\n", i,
++		    *(volatile uint32_t *)(smmu + 0x800u + i * 4u), i,
++		    *(volatile uint32_t *)(smmu + 0xc00u + i * 4u));
++	}
++}
++
+ static void
+ polaris_hfi_build(uint32_t qtbl_va)
+ {
+@@ -422,7 +492,8 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+-	if (optin != 34 && optin != 35 && optin != 36 && optin != 37) {
++	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
++	    optin != 38) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -560,7 +631,14 @@ polaris_gpu_gmu_boot(void)
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin == 35) {
++	if (optin == 38) {
++		*(volatile uint32_t *)(gpu + 0x14614u) =
++		    (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl);
++		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS HFI: QTBL_ADDR=0x%08x (physical) INFO=1\n",
++		    *(volatile uint32_t *)(gpu + 0x14614u));
++	} else if (optin == 35) {
+ 		vm_offset_t smmu2 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		uint32_t qtbl2 = smmu2 ? polaris_hfi_map(smmu2) : 0u;
+ 		if (qtbl2) {
+@@ -619,8 +697,9 @@ polaris_gpu_gmu_boot(void)
+ 			}
+ 			__asm__ __volatile__("nop");
+ 		}
+-		printf("POLARIS BOOT: hfi_ctrl=0x%08x polls=%u\n",
+-		    *(volatile uint32_t *)(gpu + 0x14600u), i);
++		printf("POLARIS BOOT: hfi_ctrl=0x%08x polls=%u info=0x%08x\n",
++		    *(volatile uint32_t *)(gpu + 0x14600u), i,
++		    *(volatile uint32_t *)(gpu + 0x14648u));
+ 	}
+ 
+ 	if (optin == 35 && v == 0xbabefaceu) {
+@@ -631,6 +710,26 @@ polaris_gpu_gmu_boot(void)
+ 		    *(volatile uint32_t *)(gpu + 0x24c14u),
+ 		    *(volatile uint32_t *)(gpu + 0x14648u));
+ 	}
++	/* ---- optin 38: page-granular HFI + SMMU bypass ---- */
++	if (optin == 38) {
++		vm_offset_t smmu3 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t pa_q[3], pa_tbl;
++
++		pa_tbl = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl);
++		pa_q[0] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[0]);
++		pa_q[1] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[1]);
++		pa_q[2] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[2]);
++
++		if (smmu3) {
++			polaris_smmu_bypass(smmu3);
++		} else {
++			printf("POLARIS BYPASS: smmu map failed\n");
++		}
++		polaris_hfi_build_pages(pa_q);
++		printf("POLARIS BYPASS: tbl=0x%08x q0=0x%08x q1=0x%08x q2=0x%08x\n",
++		    pa_tbl, pa_q[0], pa_q[1], pa_q[2]);
++	}
++
+ 	/* ---- optin 37: official "turn on the GX" request (OOB_GPU = BIT16) ---- */
+ 	if (optin == 37 && v == 0xbabefaceu) {
+ 		static const uint32_t gx_idx[3] = { 0u, 7u, 0u };
