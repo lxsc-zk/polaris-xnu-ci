@@ -1,0 +1,121 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index e51a30e..9d83098 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -493,7 +493,7 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+-	    optin != 38 && optin != 39) {
++	    optin != 38 && optin != 39 && optin != 40) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -701,6 +701,107 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 
++	/* ---- optin 40: reprogram the SMMU the way arm-smmu does it.
++	 *   qsmmuv2_halt()  : 0x6000 |= BIT(2), poll BIT(3) (IDLE)
++	 *   close the gate  : sCR0 |= BIT(0) (CLIENTPD)
++	 *   write the stream table while the port is closed
++	 *   program the context bank, SCTLR.M last
++	 *   open the gate   : sCR0 &= ~BIT(0)
++	 *   qsmmuv2_resume(): 0x6000 &= ~BIT(2)
++	 * Every access is preceded by its own marker so a hang names the loser. */
++	if (optin == 40) {
++		vm_offset_t s = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t mmu = 0u, scr0 = 0u, v = 0u;
++
++		if (!s) {
++			printf("POLARIS ARM: smmu map failed\n");
++		} else {
++			printf("POLARIS ARM: read 0x6000\n");
++			mmu = *(volatile uint32_t *)(s + 0x6000u);
++			printf("POLARIS ARM: micro_mmu=0x%08x\n", mmu);
++			printf("POLARIS ARM: read 0x000\n");
++			scr0 = *(volatile uint32_t *)(s + 0x000u);
++			printf("POLARIS ARM: scr0=0x%08x\n", scr0);
++
++			/* 1. halt the micro MMU */
++			printf("POLARIS ARM: halt req\n");
++			*(volatile uint32_t *)(s + 0x6000u) = mmu | (1u << 2);
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			for (v = 0u; v < 200000u; v++) {
++				if (*(volatile uint32_t *)(s + 0x6000u) & (1u << 3)) {
++					break;
++				}
++				__asm__ __volatile__("nop");
++			}
++			printf("POLARIS ARM: halted mmu=0x%08x polls=%u %s\n",
++			    *(volatile uint32_t *)(s + 0x6000u), v,
++			    (*(volatile uint32_t *)(s + 0x6000u) & (1u << 3)) ?
++			    "IDLE" : "NOIDLE");
++
++			/* 2. close the client port */
++			printf("POLARIS ARM: close gate\n");
++			*(volatile uint32_t *)(s + 0x000u) = scr0 | 1u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ARM: scr0 gate=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0x000u));
++
++			/* 3. stream table while the port is closed */
++			printf("POLARIS ARM: write s2cr0\n");
++			*(volatile uint32_t *)(s + 0xc00u) = 0x00020300u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ARM: s2cr0=0x%08x %s\n",
++			    *(volatile uint32_t *)(s + 0xc00u),
++			    (*(volatile uint32_t *)(s + 0xc00u) == 0x00020300u) ?
++			    "STUCK" : "DROPPED");
++			printf("POLARIS ARM: write smr0\n");
++			*(volatile uint32_t *)(s + 0x800u) = 0x80000004u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ARM: smr0=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0x800u));
++
++			/* 4. context bank 0, SCTLR.M last */
++			printf("POLARIS ARM: cb0 ttbcr\n");
++			*(volatile uint32_t *)(s + 0x8030u) = 0x00000000u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ARM: cb0 ttbcr=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0x8030u));
++			printf("POLARIS ARM: cb0 sctlr off\n");
++			*(volatile uint32_t *)(s + 0x8000u) = 0x00000000u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ARM: cb0 sctlr=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0x8000u));
++
++			/* 5. is CB5 reachable now that the micro MMU is halted? */
++			printf("POLARIS ARM: read 0xd020\n");
++			v = *(volatile uint32_t *)(s + 0xd020u);
++			printf("POLARIS ARM: cb5 ttbr0=0x%08x\n", v);
++
++			/* 6. open the gate and resume */
++			printf("POLARIS ARM: open gate\n");
++			*(volatile uint32_t *)(s + 0x000u) = scr0 & ~1u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ARM: scr0 open=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0x000u));
++			printf("POLARIS ARM: resume\n");
++			*(volatile uint32_t *)(s + 0x6000u) = mmu & ~(1u << 2);
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ARM: mmu=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0x6000u));
++			printf("POLARIS ARM: s2cr0=0x%08x smr0=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0xc00u),
++			    *(volatile uint32_t *)(s + 0x800u));
++		}
++		printf("POLARIS ARM: done\n");
++		{
++			volatile uint64_t spin = 0;
++			while (spin < 20000000000ull) {
++				spin++;
++				__asm__ __volatile__("nop");
++			}
++		}
++		return;
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
