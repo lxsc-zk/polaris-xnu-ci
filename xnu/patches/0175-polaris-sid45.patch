@@ -1,0 +1,44 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 48b79dc..756db2b 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -298,7 +298,7 @@ polaris_hfi_map(vm_offset_t smmu)
+ {
+ 	uint64_t pa_l1, pa_l2, pa_buf, base, *l1, *l2;
+ 	uint32_t v, i, idx, cb, cb_off;
+-	static const uint32_t sids[3] = { 3u, 4u, 5u };
++	static const uint32_t sids[2] = { 4u, 5u };
+ 
+ 	cb = 0u;
+ 	for (i = 0; i < 5u; i++) {
+@@ -360,7 +360,7 @@ polaris_hfi_map(vm_offset_t smmu)
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x00u) = 0x00c011e7u;
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 
+-	for (i = 0; i < 3u; i++) {
++	for (i = 0; i < 2u; i++) {
+ 		uint32_t slot = 0xffffffffu, j;
+ 		for (j = 0; j < 7u; j++) {
+ 			uint32_t smr = *(volatile uint32_t *)(smmu + 0x800u + j * 4u);
+@@ -379,15 +379,16 @@ polaris_hfi_map(vm_offset_t smmu)
+ 			}
+ 		}
+ 		if (slot != 0xffffffffu) {
+-			/* S2CR is only writable while its SMR is invalid. */
+-			*(volatile uint32_t *)(smmu + 0x800u + slot * 4u) = 0u;
++			printf("POLARIS HFI: sid%u slot%u writing smr\n",
++			    sids[i], slot);
++			*(volatile uint32_t *)(smmu + 0x800u + slot * 4u) =
++			    0x80000000u | sids[i];
+ 			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS HFI: sid%u slot%u writing s2cr\n",
++			    sids[i], slot);
+ 			*(volatile uint32_t *)(smmu + 0xc00u + slot * 4u) =
+ 			    0x00000300u | cb;
+ 			__asm__ __volatile__("dsb sy" ::: "memory");
+-			*(volatile uint32_t *)(smmu + 0x800u + slot * 4u) =
+-			    0x80000000u | sids[i];
+-			__asm__ __volatile__("dsb sy" ::: "memory");
+ 			printf("POLARIS HFI: sid%u -> cb%u slot%u smr=0x%08x s2cr=0x%08x\n",
+ 			    sids[i], cb, slot,
+ 			    *(volatile uint32_t *)(smmu + 0x800u + slot * 4u),
