@@ -1,0 +1,126 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 3d12ac2..563ffa1 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -294,9 +294,10 @@ static uint32_t
+ polaris_hfi_map(vm_offset_t smmu)
+ {
+ 	uint64_t pa_l1, pa_l2, pa_buf, base, *l1, *l2;
+-	uint32_t v, i, idx, slot, smr;
+-	const uint32_t cb = 5u;			/* gmu_kernel context bank */
+-	const uint32_t cb_off = 0x8000u + 5u * 0x1000u;
++	uint32_t v, i, idx, slot;
++	const uint32_t cb = 0u;			/* gfx3d_user CB is writable */
++	const uint32_t cb_off = 0x8000u;
++	static const uint32_t sids[2] = { 4u, 5u };	/* gmu_user, gmu_kernel */
+ 
+ 	pa_l1 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l1b);
+ 	pa_l2 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l2b);
+@@ -314,7 +315,6 @@ polaris_hfi_map(vm_offset_t smmu)
+ 		l1[i] = 0;
+ 		l2[i] = 0;
+ 	}
+-	/* Four MiB aligned window around the buffer: two 2 MiB blocks. */
+ 	base = pa_buf & ~0x3fffffull;
+ 	idx = (POLARIS_HFI_VA & 0x3fffffffu) >> 21;
+ 	if (idx + 1u >= 512u) {
+@@ -328,7 +328,7 @@ polaris_hfi_map(vm_offset_t smmu)
+ 	l1[(POLARIS_HFI_VA >> 30) & 0x1ffu] =
+ 	    (pa_l2 & 0x0000fffffffff000ull) | 3ull;
+ 
+-	/* Open the SMMU client port and reset the global fault state. */
++	/* global SMMU: open the client port */
+ 	v = *(volatile uint32_t *)(smmu + 0x48u);
+ 	*(volatile uint32_t *)(smmu + 0x48u) = v;
+ 	*(volatile uint32_t *)(smmu + 0x68u) = 0u;
+@@ -343,56 +343,56 @@ polaris_hfi_map(vm_offset_t smmu)
+ 	*(volatile uint32_t *)(smmu + 0x00u) = v;
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 
+-	/* CB5: 64-bit tables, stage-1 translate, write-back, non-shareable. */
+-	*(volatile uint32_t *)(smmu + 0x1814u) = 1u;		/* CBA2R(5) */
+-	*(volatile uint32_t *)(smmu + 0x1014u) = 0x0001f300u;	/* CBAR(5) */
++	/* CB0 only: 64-bit tables, stage-1 translate, write-back, NSH */
++	*(volatile uint32_t *)(smmu + 0x1800u + cb * 4u) = 1u;	/* CBA2R */
++	*(volatile uint32_t *)(smmu + 0x1000u + cb * 4u) = 0x0001f300u;	/* CBAR */
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x10u) = 0u;	/* TTBCR2 */
+ 	*(volatile uint64_t *)(smmu + cb_off + 0x20u) = pa_l1 & ~0xfffull;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x30u) = 0x10000351cu;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x38u) = 0x000044ffu;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x3cu) = 0u;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x58u) = 0xffffffffu;	/* FSR */
+-	*(volatile uint32_t *)(smmu + cb_off + 0x00u) = 0x00c010e7u;	/* SCTLR */
++	*(volatile uint32_t *)(smmu + cb_off + 0x00u) = 0x00c011e7u;	/* SCTLR */
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 
+-	/* Point the SID5 stream (GMU kernel) at CB5 with TYPE=translate. */
+-	slot = 0xffffffffu;
+-	for (i = 0; i < 8u; i++) {
+-		smr = *(volatile uint32_t *)(smmu + 0x800u + i * 4u);
+-		if ((smr & 0xffffu) == 5u) {
+-			slot = i;
+-			break;
+-		}
+-	}
+-	if (slot == 0xffffffffu) {
+-		for (i = 0; i < 8u; i++) {
+-			smr = *(volatile uint32_t *)(smmu + 0x800u + i * 4u);
+-			if (!(smr & (1u << 31))) {
+-				slot = i;
++	/* route the GMU streams to CB0 with TYPE=translate */
++	for (i = 0; i < 2u; i++) {
++		slot = 0xffffffffu;
++		for (v = 0; v < 8u; v++) {
++			uint32_t smr = *(volatile uint32_t *)(smmu + 0x800u + v * 4u);
++			if ((smr & 0xffffu) == sids[i] && (smr & (1u << 31))) {
++				slot = v;
+ 				break;
+ 			}
+ 		}
++		if (slot == 0xffffffffu) {
++			for (v = 0; v < 8u; v++) {
++				uint32_t smr = *(volatile uint32_t *)(smmu + 0x800u + v * 4u);
++				if (!(smr & (1u << 31)) && smr == 0u) {
++					slot = v;
++					break;
++				}
++			}
++		}
++		if (slot != 0xffffffffu) {
++			*(volatile uint32_t *)(smmu + 0x800u + slot * 4u) =
++			    0x80000000u | sids[i];
++			*(volatile uint32_t *)(smmu + 0xc00u + slot * 4u) = 0x00000300u;
++			printf("POLARIS HFI: sid%u -> cb0 slot%u\n", sids[i], slot);
++		} else {
++			printf("POLARIS HFI: sid%u no free slot\n", sids[i]);
++		}
+ 	}
+-	if (slot != 0xffffffffu) {
+-		*(volatile uint32_t *)(smmu + 0x800u + slot * 4u) = 0x80000005u;
+-		*(volatile uint32_t *)(smmu + 0xc00u + slot * 4u) = 0x00000305u;
+-		__asm__ __volatile__("dsb sy" ::: "memory");
+-	}
+-	/* invalidate CB5 TLBs */
+-	*(volatile uint32_t *)(smmu + cb_off + 0x618u) = 1u;
+-	*(volatile uint32_t *)(smmu + cb_off + 0x7f0u) = 0u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	*(volatile uint32_t *)(smmu + cb_off + 0x618u) = 1u;	/* TLBIALL */
++	*(volatile uint32_t *)(smmu + cb_off + 0x7f0u) = 0u;	/* TLBSYNC */
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 
+-	printf("POLARIS HFI: cb%u bar=0x%08x sctl=0x%08x ttbr0=0x%llx slot=%u s2cr=0x%08x\n",
+-	    cb, *(volatile uint32_t *)(smmu + 0x1014u),
++	printf("POLARIS HFI: cb0 bar=0x%08x sctl=0x%08x ttbr0=0x%llx va=0x%08x\n",
++	    *(volatile uint32_t *)(smmu + 0x1000u),
+ 	    *(volatile uint32_t *)(smmu + cb_off + 0x00u),
+ 	    (unsigned long long)*(volatile uint64_t *)(smmu + cb_off + 0x20u),
+-	    slot,
+-	    (slot == 0xffffffffu) ? 0u :
+-	    *(volatile uint32_t *)(smmu + 0xc00u + slot * 4u));
+-	printf("POLARIS HFI: va=0x%08x buf=0x%llx base=0x%llx idx=%u\n",
+-	    POLARIS_HFI_VA, (unsigned long long)pa_buf,
+-	    (unsigned long long)base, idx);
++	    POLARIS_HFI_VA);
+ 	return POLARIS_HFI_VA + (uint32_t)(pa_buf - base);
+ }
+ 
