@@ -1,0 +1,91 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 3ece31f..6b5bec4 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -494,7 +494,7 @@ polaris_gpu_gmu_boot(void)
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+ 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
+-	    optin != 42) {
++	    optin != 42 && optin != 43) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -916,6 +916,77 @@ polaris_gpu_gmu_boot(void)
+ 		}
+ 	}
+ 
++/* SCM(SIP) call: x0 = CALL_VAL, x1 = arginfo, x2..x5 = args, x6 = 0.
++ * smc #0 returns x0 = status and x1..x3 = ret[0..2]. */
++static int
++polaris_scm_call(uint64_t fnid, uint64_t arginfo, uint64_t a0, uint64_t a1,
++    uint64_t *ret0)
++{
++	register uint64_t r0 __asm__("x0") = fnid;
++	register uint64_t r1 __asm__("x1") = arginfo;
++	register uint64_t r2 __asm__("x2") = a0;
++	register uint64_t r3 __asm__("x3") = a1;
++	register uint64_t r4 __asm__("x4") = 0ull;
++	register uint64_t r5 __asm__("x5") = 0ull;
++	register uint64_t r6 __asm__("x6") = 0ull;
++
++	__asm__ __volatile__("smc #0\n"
++	    : "+r"(r0), "+r"(r1), "+r"(r2), "+r"(r3), "+r"(r4), "+r"(r5), "+r"(r6)
++	    :
++	    : "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
++	      "x16", "x17", "memory");
++	if (ret0) {
++		*ret0 = r1;
++	}
++	return (int)(int64_t)r0;
++}
++
++	/* ---- optin 43: enumerate the SCM call table the way Linux does.
++	 * Read-only: every query is SCM_SVC_INFO/IS_CALL_AVAIL and performs no
++	 * action in the secure world. ---- */
++	if (optin == 43) {
++		uint64_t avail = 0ull;
++		uint32_t svc, cmd, hits = 0u;
++		int st64, st32;
++
++		/* which SMC convention does this firmware speak? */
++		st64 = polaris_scm_call(0x42000601ull, 1ull, 0x02000601ull, 0ull, &avail);
++		printf("POLARIS SCM: probe64 st=%d avail=0x%llx\n", st64,
++		    (unsigned long long)avail);
++		st32 = polaris_scm_call(0x02000601ull, 1ull, 0x02000601ull, 0ull, &avail);
++		printf("POLARIS SCM: probe32 st=%d avail=0x%llx\n", st32,
++		    (unsigned long long)avail);
++
++		for (svc = 0x01u; svc <= 0x1fu; svc++) {
++			for (cmd = 0u; cmd < 0x40u; cmd++) {
++				uint64_t fn, av;
++				int st;
++
++				fn = (st64 == 0) ? 0x42000601ull : 0x02000601ull;
++				st = polaris_scm_call(fn, 1ull,
++				    0x02000000ull | ((uint64_t)svc << 8) | cmd,
++				    0ull, &av);
++				if (st != 0) {
++					continue;
++				}
++				if (av != 0ull) {
++					printf("POLARIS SCM: svc=0x%02x cmd=0x%02x AVAIL\n",
++					    svc, cmd);
++					hits++;
++				}
++			}
++		}
++		printf("POLARIS SCM: scan done, hits=%u\n", hits);
++		{
++			volatile uint64_t spin = 0;
++			while (spin < 20000000000ull) {
++				spin++;
++				__asm__ __volatile__("nop");
++			}
++		}
++		return;
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
