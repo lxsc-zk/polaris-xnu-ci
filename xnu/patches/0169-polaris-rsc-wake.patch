@@ -1,0 +1,65 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 845e946..3d12ac2 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -438,7 +438,7 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+-	if (optin != 34 && optin != 35) {
++	if (optin != 34 && optin != 35 && optin != 36) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -512,7 +512,7 @@ polaris_gpu_gmu_boot(void)
+ 	    *(volatile uint32_t *)(gpu + 0x24c14u));
+ 
+ 	/* 2b. RSC/PDC sequencer microcode (optin 35) */
+-	if (optin == 35) {
++	if (optin == 35 || optin == 36) {
+ 		vm_offset_t pdc = ml_io_map(0xb200000ull, 0x300000);
+ 		if (pdc) {
+ 			polaris_rsc_ucode(gpu);
+@@ -672,6 +672,42 @@ polaris_gpu_gmu_boot(void)
+ 		    gv, *(volatile uint32_t *)(gpucc + 0x1054u));
+ 	}
+ 
++	if (optin == 36 && v == 0xbabefaceu) {
++		uint32_t ack = 0, busy = 0xffffffffu, misc;
++
++		misc = *(volatile uint32_t *)(gpucc + 0x1508u);
++		printf("POLARIS BOOT: rsc pre gx=0x%08x misc=0x%08x\n",
++		    *(volatile uint32_t *)(gpucc + 0x100cu), misc);
++		/* ask the RSC hardware sequencer to run the wake sequence */
++		*(volatile uint32_t *)(gpu + 0x24c1cu) = (1u << 1);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		for (i = 0; i < 2000000u; i++) {
++			ack = *(volatile uint32_t *)(gpu + 0x24c20u);
++			if (ack & (1u << 1)) {
++				break;
++			}
++			__asm__ __volatile__("nop");
++		}
++		printf("POLARIS BOOT: rsc ack=0x%08x polls=%u %s\n", ack, i,
++		    (ack & (1u << 1)) ? "ACK-OK" : "ACK-TIMEOUT");
++		if (ack & (1u << 1)) {
++			for (i = 0; i < 2000000u; i++) {
++				busy = *(volatile uint32_t *)(gpu + 0x23404u);
++				if (busy == 0u) {
++					break;
++				}
++				__asm__ __volatile__("nop");
++			}
++			printf("POLARIS BOOT: rsc busy=0x%08x polls=%u %s\n",
++			    busy, i, (busy == 0u) ? "SEQ-DONE" : "SEQ-BUSY");
++		}
++		*(volatile uint32_t *)(gpu + 0x24c1cu) = 0u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS BOOT: rsc post gx=0x%08x misc=0x%08x\n",
++		    *(volatile uint32_t *)(gpucc + 0x100cu),
++		    *(volatile uint32_t *)(gpucc + 0x1508u));
++	}
++
+ 	printf("POLARIS BOOT: GX=0x%08x CX=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpucc + 0x100cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x106cu));
