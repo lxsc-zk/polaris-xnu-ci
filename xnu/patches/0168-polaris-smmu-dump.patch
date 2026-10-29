@@ -1,0 +1,48 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 7690ffa..de4ce8b 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -349,6 +349,29 @@ polaris_hfi_map(vm_offset_t smmu)
+ 	return POLARIS_HFI_VA + (uint32_t)(pa_buf - base);
+ }
+ 
++/* Read-only SMMU state dump (GR0 only: safe). */
++static void
++polaris_smmu_dump(vm_offset_t smmu)
++{
++	uint32_t i;
++
++	printf("POLARIS SMMU: id0=0x%08x id1=0x%08x id2=0x%08x scr0=0x%08x\n",
++	    *(volatile uint32_t *)(smmu + 0x20u),
++	    *(volatile uint32_t *)(smmu + 0x24u),
++	    *(volatile uint32_t *)(smmu + 0x28u),
++	    *(volatile uint32_t *)(smmu + 0x00u));
++	for (i = 0; i < 8u; i++) {
++		printf("POLARIS SMMU: smr%u=0x%08x s2cr%u=0x%08x\n", i,
++		    *(volatile uint32_t *)(smmu + 0x800u + i * 4u), i,
++		    *(volatile uint32_t *)(smmu + 0xc00u + i * 4u));
++	}
++	for (i = 0; i < 7u; i++) {
++		printf("POLARIS SMMU: cbar%u=0x%08x cba2r%u=0x%08x\n", i,
++		    *(volatile uint32_t *)(smmu + 0x1000u + i * 4u), i,
++		    *(volatile uint32_t *)(smmu + 0x1800u + i * 4u));
++	}
++}
++
+ /*
+  * Minimal GMU boot attempt with the correct A6xx addressing
+  * (absolute = 0x5000000 + (register define << 2)):
+@@ -426,6 +449,13 @@ polaris_gpu_gmu_boot(void)
+ 	    *(volatile uint32_t *)(gpucc + 0x109cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x1064u));
+ 
++	if (optin == 35) {
++		vm_offset_t s0 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		if (s0) {
++			polaris_smmu_dump(s0);
++		}
++	}
++
+ 	/* 2a. clear stale GMU interrupt latches (official gmu_irq_enable) */
+ 	*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;	/* GMU2HOST_INTR_CLR */
+ 	*(volatile uint32_t *)(gpu + 0x24c10u) = 0xffffffffu;	/* AO_HOST_INTR_CLR */
