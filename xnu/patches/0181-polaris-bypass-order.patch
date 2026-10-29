@@ -1,0 +1,58 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 5dea427..8db9c39 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -627,6 +627,26 @@ polaris_gpu_gmu_boot(void)
+ 	    *(volatile uint32_t *)(gpu + 0x14300u),
+ 	    *(volatile uint32_t *)(gpu + 0x14308u));
+ 
++	/* ---- optin 38: page-granular HFI + SMMU bypass ---- */
++	if (optin == 38) {
++		vm_offset_t smmu3 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t pa_q[3], pa_tbl;
++
++		pa_tbl = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl);
++		pa_q[0] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[0]);
++		pa_q[1] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[1]);
++		pa_q[2] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[2]);
++
++		if (smmu3) {
++			polaris_smmu_bypass(smmu3);
++		} else {
++			printf("POLARIS BYPASS: smmu map failed\n");
++		}
++		polaris_hfi_build_pages(pa_q);
++		printf("POLARIS BYPASS: tbl=0x%08x q0=0x%08x q1=0x%08x q2=0x%08x\n",
++		    pa_tbl, pa_q[0], pa_q[1], pa_q[2]);
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+@@ -710,26 +730,6 @@ polaris_gpu_gmu_boot(void)
+ 		    *(volatile uint32_t *)(gpu + 0x24c14u),
+ 		    *(volatile uint32_t *)(gpu + 0x14648u));
+ 	}
+-	/* ---- optin 38: page-granular HFI + SMMU bypass ---- */
+-	if (optin == 38) {
+-		vm_offset_t smmu3 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+-		uint32_t pa_q[3], pa_tbl;
+-
+-		pa_tbl = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl);
+-		pa_q[0] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[0]);
+-		pa_q[1] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[1]);
+-		pa_q[2] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[2]);
+-
+-		if (smmu3) {
+-			polaris_smmu_bypass(smmu3);
+-		} else {
+-			printf("POLARIS BYPASS: smmu map failed\n");
+-		}
+-		polaris_hfi_build_pages(pa_q);
+-		printf("POLARIS BYPASS: tbl=0x%08x q0=0x%08x q1=0x%08x q2=0x%08x\n",
+-		    pa_tbl, pa_q[0], pa_q[1], pa_q[2]);
+-	}
+-
+ 	/* ---- optin 37: official "turn on the GX" request (OOB_GPU = BIT16) ---- */
+ 	if (optin == 37 && v == 0xbabefaceu) {
+ 		static const uint32_t gx_idx[3] = { 0u, 7u, 0u };
