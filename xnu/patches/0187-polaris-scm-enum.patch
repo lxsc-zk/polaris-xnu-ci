@@ -1,20 +1,11 @@
 diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
-index 3ece31f..6b5bec4 100644
+index 3ece31f..2265e89 100644
 --- a/bsd/dev/polaris_gpu_diag.c
 +++ b/bsd/dev/polaris_gpu_diag.c
-@@ -494,7 +494,7 @@ polaris_gpu_gmu_boot(void)
- 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
- 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
- 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
--	    optin != 42) {
-+	    optin != 42 && optin != 43) {
- 		return;
- 	}
- 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
-@@ -916,6 +916,77 @@ polaris_gpu_gmu_boot(void)
- 		}
- 	}
- 
+@@ -479,6 +479,31 @@ polaris_smmu_alias(vm_offset_t smmu)
+  *   CX + clocks -> ITCM 32 KiB -> BOOT_CONFIG=2 -> SYSRESET 1->0
+  *   -> poll CM3_FW_INIT_RESULT for 0xBABEFACE.
+  */
 +/* SCM(SIP) call: x0 = CALL_VAL, x1 = arginfo, x2..x5 = args, x6 = 0.
 + * smc #0 returns x0 = status and x1..x3 = ret[0..2]. */
 +static int
@@ -40,15 +31,31 @@ index 3ece31f..6b5bec4 100644
 +	return (int)(int64_t)r0;
 +}
 +
+ void
+ polaris_gpu_gmu_boot(void)
+ {
+@@ -494,7 +519,7 @@ polaris_gpu_gmu_boot(void)
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+ 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
+-	    optin != 42) {
++	    optin != 42 && optin != 43) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -916,6 +941,52 @@ polaris_gpu_gmu_boot(void)
+ 		}
+ 	}
+ 
 +	/* ---- optin 43: enumerate the SCM call table the way Linux does.
 +	 * Read-only: every query is SCM_SVC_INFO/IS_CALL_AVAIL and performs no
 +	 * action in the secure world. ---- */
 +	if (optin == 43) {
 +		uint64_t avail = 0ull;
 +		uint32_t svc, cmd, hits = 0u;
-+		int st64, st32;
++		int st64;
++		int st32;
 +
-+		/* which SMC convention does this firmware speak? */
 +		st64 = polaris_scm_call(0x42000601ull, 1ull, 0x02000601ull, 0ull, &avail);
 +		printf("POLARIS SCM: probe64 st=%d avail=0x%llx\n", st64,
 +		    (unsigned long long)avail);
