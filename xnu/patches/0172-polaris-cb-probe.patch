@@ -1,0 +1,156 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index f2d433a..ef61f74 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -294,17 +294,25 @@ static uint32_t
+ polaris_hfi_map(vm_offset_t smmu)
+ {
+ 	uint64_t pa_l1, pa_l2, pa_buf, base, *l1, *l2;
+-	uint32_t v, i, idx;
+-	const uint32_t cb_off = 0x8000u + 5u * 0x1000u;	/* CB5, no GR1/CBAR */
++	uint32_t v, i, idx, cb, cb_off;
++	static const uint32_t sids[3] = { 3u, 4u, 5u };
++
++	/* prefer CB5, then CB4, then CB0 */
++	cb = 0u;
++	for (i = 0; i < 6u; i++) {
++		if (polaris_cb_ok[i] == 1 && i >= cb) {
++			cb = i;
++		}
++	}
++	cb_off = 0x8000u + cb * 0x1000u;
++	printf("POLARIS HFI: using cb%u (off=0x%x)\n", cb, cb_off);
+ 
+ 	pa_l1 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l1b);
+ 	pa_l2 = (uint64_t)ml_static_vtop((vm_offset_t)polaris_smmu_l2b);
+ 	pa_buf = (uint64_t)ml_static_vtop((vm_offset_t)polaris_hfi_mem);
+ 	if (!pa_l1 || !pa_l2 || !pa_buf ||
+ 	    (pa_l1 & 0xfffull) || (pa_l2 & 0xfffull)) {
+-		printf("POLARIS HFI: bad pa l1=0x%llx l2=0x%llx buf=0x%llx\n",
+-		    (unsigned long long)pa_l1, (unsigned long long)pa_l2,
+-		    (unsigned long long)pa_buf);
++		printf("POLARIS HFI: bad pa\n");
+ 		return 0;
+ 	}
+ 	l1 = (uint64_t *)polaris_smmu_l1b;
+@@ -326,7 +334,6 @@ polaris_hfi_map(vm_offset_t smmu)
+ 	l1[(POLARIS_HFI_VA >> 30) & 0x1ffu] =
+ 	    (pa_l2 & 0x0000fffffffff000ull) | 3ull;
+ 
+-	/* open the client port */
+ 	v = *(volatile uint32_t *)(smmu + 0x00u);
+ 	v |= 0x0020u | (1u << 1) | (1u << 2) | (1u << 4) | (1u << 5) |
+ 	    (1u << 11) | (1u << 12);
+@@ -337,27 +344,53 @@ polaris_hfi_map(vm_offset_t smmu)
+ 	*(volatile uint32_t *)(smmu + 0x00u) = v;
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 
+-	printf("POLARIS HFI: cb5 before sctl=0x%08x ttbr0=0x%llx ttbcr=0x%08x\n",
+-	    *(volatile uint32_t *)(smmu + cb_off + 0x00u),
+-	    (unsigned long long)*(volatile uint64_t *)(smmu + cb_off + 0x20u),
+-	    *(volatile uint32_t *)(smmu + cb_off + 0x30u));
+-
+-	/* disable CB5, rewrite the table, then re-enable */
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x00u) = 0u;
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+-	*(volatile uint32_t *)(smmu + cb_off + 0x10u) = 0u;	/* TTBCR2 */
++	*(volatile uint32_t *)(smmu + cb_off + 0x10u) = 0u;
+ 	*(volatile uint64_t *)(smmu + cb_off + 0x20u) = pa_l1 & ~0xfffull;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x30u) = 0x10000351cu;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x38u) = 0x000044ffu;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x3cu) = 0u;
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x58u) = 0xffffffffu;
+-	*(volatile uint32_t *)(smmu + cb_off + 0x618u) = 1u;	/* TLBIALL */
+-	*(volatile uint32_t *)(smmu + cb_off + 0x7f0u) = 0u;	/* TLBSYNC */
++	*(volatile uint32_t *)(smmu + cb_off + 0x618u) = 1u;
++	*(volatile uint32_t *)(smmu + cb_off + 0x7f0u) = 0u;
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	*(volatile uint32_t *)(smmu + cb_off + 0x00u) = 0x00c011e7u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
+ 
+-	printf("POLARIS HFI: cb5 after  sctl=0x%08x ttbr0=0x%llx va=0x%08x\n",
+-	    *(volatile uint32_t *)(smmu + cb_off + 0x00u),
++	/* route every GMU-related stream at the chosen CB */
++	for (i = 0; i < 3u; i++) {
++		uint32_t slot = 0xffffffffu, j;
++		for (j = 0; j < 7u; j++) {
++			uint32_t smr = *(volatile uint32_t *)(smmu + 0x800u + j * 4u);
++			if ((smr & 0xffffu) == sids[i] && (smr & (1u << 31))) {
++				slot = j;
++				break;
++			}
++		}
++		if (slot == 0xffffffffu) {
++			for (j = 0; j < 7u; j++) {
++				uint32_t smr = *(volatile uint32_t *)(smmu + 0x800u + j * 4u);
++				if (smr == 0u) {
++					slot = j;
++					break;
++				}
++			}
++		}
++		if (slot != 0xffffffffu) {
++			*(volatile uint32_t *)(smmu + 0x800u + slot * 4u) =
++			    0x80000000u | sids[i];
++			*(volatile uint32_t *)(smmu + 0xc00u + slot * 4u) =
++			    0x00000300u | cb;
++			printf("POLARIS HFI: sid%u -> cb%u slot%u s2cr=0x%08x\n",
++			    sids[i], cb, slot,
++			    *(volatile uint32_t *)(smmu + 0xc00u + slot * 4u));
++		}
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++
++	printf("POLARIS HFI: cb%u sctl=0x%08x ttbr0=0x%llx va=0x%08x\n",
++	    cb, *(volatile uint32_t *)(smmu + cb_off + 0x00u),
+ 	    (unsigned long long)*(volatile uint64_t *)(smmu + cb_off + 0x20u),
+ 	    POLARIS_HFI_VA);
+ 	return POLARIS_HFI_VA + (uint32_t)(pa_buf - base);
+@@ -374,13 +407,38 @@ polaris_smmu_dump(vm_offset_t smmu)
+ 	    *(volatile uint32_t *)(smmu + 0x24u),
+ 	    *(volatile uint32_t *)(smmu + 0x28u),
+ 	    *(volatile uint32_t *)(smmu + 0x00u));
+-	for (i = 0; i < 8u; i++) {
++	for (i = 0; i < 7u; i++) {
+ 		printf("POLARIS SMMU: smr%u=0x%08x s2cr%u=0x%08x\n", i,
+ 		    *(volatile uint32_t *)(smmu + 0x800u + i * 4u), i,
+ 		    *(volatile uint32_t *)(smmu + 0xc00u + i * 4u));
+ 	}
+ }
+ 
++/* Which context banks actually respond; -1 = not yet probed. */
++static int polaris_cb_ok[6] = { -1, -1, -1, -1, -1, -1 };
++static uint32_t polaris_cb_sctl[6];
++
++/* Probe CB0..CB5 read-only. A marker is printed before each touch so a hang
++ * still tells us which context bank is out of range. */
++static void
++polaris_cb_probe(vm_offset_t smmu)
++{
++	uint32_t i;
++
++	printf("POLARIS CB: probe start\n");
++	for (i = 0; i < 6u; i++) {
++		if (i >= 4u) {
++			printf("POLARIS CB: touching cb%u at 0x%x\n", i,
++			    0x8000u + i * 0x1000u);
++		}
++		polaris_cb_sctl[i] =
++		    *(volatile uint32_t *)(smmu + 0x8000u + i * 0x1000u);
++		polaris_cb_ok[i] = 1;
++		printf("POLARIS CB: cb%u sctl=0x%08x\n", i, polaris_cb_sctl[i]);
++	}
++	printf("POLARIS CB: probe done\n");
++}
++
+ /*
+  * Minimal GMU boot attempt with the correct A6xx addressing
+  * (absolute = 0x5000000 + (register define << 2)):
+@@ -462,6 +520,7 @@ polaris_gpu_gmu_boot(void)
+ 		vm_offset_t s0 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		if (s0) {
+ 			polaris_smmu_dump(s0);
++			polaris_cb_probe(s0);
+ 		}
+ 	}
+ 
