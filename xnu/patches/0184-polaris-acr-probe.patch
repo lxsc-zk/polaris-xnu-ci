@@ -1,0 +1,93 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 9d83098..e042b9f 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -493,7 +493,7 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+-	    optin != 38 && optin != 39 && optin != 40) {
++	    optin != 38 && optin != 39 && optin != 40 && optin != 41) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -802,6 +802,79 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 
++	/* ---- optin 41: read the Secure Access Control Register, which is what
++	 * decides whether the non-secure world may write sCR0 / S2CR at all.
++	 * arm-smmu clears CACHE_LOCK (bit 26) here and WARNs if it will not clear. */
++	if (optin == 41) {
++		vm_offset_t s = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t sacr = 0u, id7 = 0u, scr0 = 0u, id0 = 0u, id1 = 0u;
++		uint32_t v = 0u;
++
++		if (!s) {
++			printf("POLARIS ACR: smmu map failed\n");
++		} else {
++			printf("POLARIS ACR: read 0x010\n");
++			sacr = *(volatile uint32_t *)(s + 0x010u);
++			printf("POLARIS ACR: sacr=0x%08x cache_lock=%u\n", sacr,
++			    (sacr >> 26) & 1u);
++			printf("POLARIS ACR: read 0x01c\n");
++			id7 = *(volatile uint32_t *)(s + 0x01cu);
++			printf("POLARIS ACR: id7=0x%08x\n", id7);
++			printf("POLARIS ACR: read 0x000\n");
++			scr0 = *(volatile uint32_t *)(s + 0x000u);
++			printf("POLARIS ACR: scr0=0x%08x\n", scr0);
++			printf("POLARIS ACR: read 0x020\n");
++			id0 = *(volatile uint32_t *)(s + 0x020u);
++			printf("POLARIS ACR: id0=0x%08x\n", id0);
++			printf("POLARIS ACR: read 0x024\n");
++			id1 = *(volatile uint32_t *)(s + 0x024u);
++			printf("POLARIS ACR: id1=0x%08x\n", id1);
++
++			/* clear CACHE_LOCK the way arm-smmu does */
++			printf("POLARIS ACR: clear cache_lock\n");
++			*(volatile uint32_t *)(s + 0x010u) = sacr & ~(1u << 26);
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			v = *(volatile uint32_t *)(s + 0x010u);
++			printf("POLARIS ACR: sacr readback=0x%08x cache_lock=%u %s\n",
++			    v, (v >> 26) & 1u,
++			    ((v >> 26) & 1u) ? "LOCKED" : "CLEARED");
++
++			/* retry the two writes that used to be dropped */
++			printf("POLARIS ACR: retry scr0 bit0\n");
++			*(volatile uint32_t *)(s + 0x000u) = scr0 | 1u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ACR: scr0=0x%08x %s\n",
++			    *(volatile uint32_t *)(s + 0x000u),
++			    (*(volatile uint32_t *)(s + 0x000u) & 1u) ?
++			    "STUCK" : "DROPPED");
++			printf("POLARIS ACR: retry s2cr0\n");
++			*(volatile uint32_t *)(s + 0xc00u) = 0x00020300u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ACR: s2cr0=0x%08x %s\n",
++			    *(volatile uint32_t *)(s + 0xc00u),
++			    (*(volatile uint32_t *)(s + 0xc00u) == 0x00020300u) ?
++			    "STUCK" : "DROPPED");
++
++			/* restore */
++			printf("POLARIS ACR: restore\n");
++			*(volatile uint32_t *)(s + 0x010u) = sacr;
++			*(volatile uint32_t *)(s + 0x000u) = scr0;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS ACR: final sacr=0x%08x scr0=0x%08x\n",
++			    *(volatile uint32_t *)(s + 0x010u),
++			    *(volatile uint32_t *)(s + 0x000u));
++		}
++		printf("POLARIS ACR: done\n");
++		{
++			volatile uint64_t spin = 0;
++			while (spin < 20000000000ull) {
++				spin++;
++				__asm__ __volatile__("nop");
++			}
++		}
++		return;
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
