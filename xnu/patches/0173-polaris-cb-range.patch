@@ -1,0 +1,30 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index ed5f797..7223056 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -301,7 +301,7 @@ polaris_hfi_map(vm_offset_t smmu)
+ 	static const uint32_t sids[3] = { 3u, 4u, 5u };
+ 
+ 	cb = 0u;
+-	for (i = 0; i < 6u; i++) {
++	for (i = 0; i < 5u; i++) {
+ 		if (polaris_cb_ok[i] == 1 && i >= cb) {
+ 			cb = i;
+ 		}
+@@ -422,12 +422,10 @@ polaris_cb_probe(vm_offset_t smmu)
+ {
+ 	uint32_t i;
+ 
+-	printf("POLARIS CB: probe start\n");
+-	for (i = 0; i < 6u; i++) {
+-		if (i >= 4u) {
+-			printf("POLARIS CB: touching cb%u at 0x%x\n", i,
+-			    0x8000u + i * 0x1000u);
+-		}
++	printf("POLARIS CB: probe start (CB0..CB4 only)\n");
++	for (i = 0; i < 5u; i++) {
++		printf("POLARIS CB: touching cb%u at 0x%x\n", i,
++		    0x8000u + i * 0x1000u);
+ 		polaris_cb_sctl[i] =
+ 		    *(volatile uint32_t *)(smmu + 0x8000u + i * 0x1000u);
+ 		polaris_cb_ok[i] = 1;
