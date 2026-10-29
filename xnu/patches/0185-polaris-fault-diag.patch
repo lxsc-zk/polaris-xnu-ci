@@ -1,0 +1,124 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index e042b9f..1c8174d 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -493,7 +493,8 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+-	    optin != 38 && optin != 39 && optin != 40 && optin != 41) {
++	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
++	    optin != 42) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -875,11 +876,51 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 
++	/* ---- optin 42: baseline the SMMU fault registers, then let the GMU try
++	 * to fetch the queue table and read them again.  This answers the one
++	 * question we still cannot answer: does the GMU's memory access go
++	 * through this SMMU, and with which stream id? ---- */
++	if (optin == 42) {
++		vm_offset_t sf = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t g = 0u;
++
++		if (sf) {
++			{
++			uint32_t pq[3];
++			pq[0] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[0]);
++			pq[1] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[1]);
++			pq[2] = (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_q[2]);
++			polaris_hfi_build_pages(pq);
++			printf("POLARIS FAULT: qtbl pa=0x%08x q=0x%08x 0x%08x 0x%08x\n",
++			    (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl),
++			    pq[0], pq[1], pq[2]);
++		}
++			printf("POLARIS FAULT: base gfsr=0x%08x synr0=0x%08x synr1=0x%08x\n",
++			    *(volatile uint32_t *)(sf + 0x048u),
++			    *(volatile uint32_t *)(sf + 0x04cu),
++			    *(volatile uint32_t *)(sf + 0x050u));
++			printf("POLARIS FAULT: base cb fsr=0x%08x 0x%08x 0x%08x 0x%08x 0x%08x\n",
++			    *(volatile uint32_t *)(sf + 0x8008u),
++			    *(volatile uint32_t *)(sf + 0x9008u),
++			    *(volatile uint32_t *)(sf + 0xa008u),
++			    *(volatile uint32_t *)(sf + 0xb008u),
++			    *(volatile uint32_t *)(sf + 0xc008u));
++			/* write back to clear (arm-smmu does exactly this) */
++			g = *(volatile uint32_t *)(sf + 0x048u);
++			*(volatile uint32_t *)(sf + 0x048u) = g;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS FAULT: cleared gfsr=0x%08x (wrote 0x%08x)\n",
++			    *(volatile uint32_t *)(sf + 0x048u), g);
++		} else {
++			printf("POLARIS FAULT: smmu map failed\n");
++		}
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin == 38) {
++	if (optin == 38 || optin == 42) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) =
+ 		    (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl);
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+@@ -936,18 +977,48 @@ polaris_gpu_gmu_boot(void)
+ 		    *(volatile uint32_t *)(gpu + 0x14070u),
+ 		    *(volatile uint32_t *)(gpu + 0x14648u),
+ 		    *(volatile uint32_t *)(gpu + 0x24c14u));
+-		/* try HFI init without a queue table, just to observe the status */
++		/* try HFI init */
+ 		*(volatile uint32_t *)(gpu + 0x14618u) = 1u;	/* HFI_CTRL_INIT */
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+-		for (i = 0; i < 200000u; i++) {
+-			if (*(volatile uint32_t *)(gpu + 0x14600u) & 1u) {
+-				break;
++		if (optin == 42) {
++			vm_offset_t sf2 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++			uint32_t k;
++			for (k = 0; k < 400000u; k++) {
++				__asm__ __volatile__("nop");
+ 			}
+-			__asm__ __volatile__("nop");
++			if (sf2) {
++				printf("POLARIS FAULT: post gfsr=0x%08x synr0=0x%08x synr1=0x%08x\n",
++				    *(volatile uint32_t *)(sf2 + 0x048u),
++				    *(volatile uint32_t *)(sf2 + 0x04cu),
++				    *(volatile uint32_t *)(sf2 + 0x050u));
++				printf("POLARIS FAULT: post cb fsr=0x%08x 0x%08x 0x%08x 0x%08x 0x%08x\n",
++				    *(volatile uint32_t *)(sf2 + 0x8008u),
++				    *(volatile uint32_t *)(sf2 + 0x9008u),
++				    *(volatile uint32_t *)(sf2 + 0xa008u),
++				    *(volatile uint32_t *)(sf2 + 0xb008u),
++				    *(volatile uint32_t *)(sf2 + 0xc008u));
++				printf("POLARIS FAULT: post far=0x%08x 0x%08x 0x%08x 0x%08x 0x%08x\n",
++				    *(volatile uint32_t *)(sf2 + 0x8060u),
++				    *(volatile uint32_t *)(sf2 + 0x9060u),
++				    *(volatile uint32_t *)(sf2 + 0xa060u),
++				    *(volatile uint32_t *)(sf2 + 0xb060u),
++				    *(volatile uint32_t *)(sf2 + 0xc060u));
++			}
++			printf("POLARIS FAULT: now reading gmu hfi status (may hang)\n");
++			printf("POLARIS FAULT: hfi_ctrl=0x%08x info=0x%08x\n",
++			    *(volatile uint32_t *)(gpu + 0x14600u),
++			    *(volatile uint32_t *)(gpu + 0x14648u));
++		} else {
++			for (i = 0; i < 200000u; i++) {
++				if (*(volatile uint32_t *)(gpu + 0x14600u) & 1u) {
++					break;
++				}
++				__asm__ __volatile__("nop");
++			}
++			printf("POLARIS BOOT: hfi_ctrl=0x%08x polls=%u info=0x%08x\n",
++			    *(volatile uint32_t *)(gpu + 0x14600u), i,
++			    *(volatile uint32_t *)(gpu + 0x14648u));
+ 		}
+-		printf("POLARIS BOOT: hfi_ctrl=0x%08x polls=%u info=0x%08x\n",
+-		    *(volatile uint32_t *)(gpu + 0x14600u), i,
+-		    *(volatile uint32_t *)(gpu + 0x14648u));
+ 	}
+ 
+ 	if (optin == 35 && v == 0xbabefaceu) {
