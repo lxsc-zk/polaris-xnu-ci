@@ -1,0 +1,33 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 1c8174d..3ece31f 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -977,13 +977,15 @@ polaris_gpu_gmu_boot(void)
+ 		    *(volatile uint32_t *)(gpu + 0x14070u),
+ 		    *(volatile uint32_t *)(gpu + 0x14648u),
+ 		    *(volatile uint32_t *)(gpu + 0x24c14u));
+-		/* try HFI init */
+-		*(volatile uint32_t *)(gpu + 0x14618u) = 1u;	/* HFI_CTRL_INIT */
+-		__asm__ __volatile__("dsb sy" ::: "memory");
++		/* try HFI init (optin 42 deliberately omits the dsb: the posted write
++		 * is what stalls the AHB, so we want to reach the SMMU first) */
+ 		if (optin == 42) {
+ 			vm_offset_t sf2 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 			uint32_t k;
+-			for (k = 0; k < 400000u; k++) {
++			printf("POLARIS FAULT: trigger hfi init\n");
++			*(volatile uint32_t *)(gpu + 0x14618u) = 1u;	/* HFI_CTRL_INIT */
++			printf("POLARIS FAULT: store returned\n");
++			for (k = 0; k < 20000u; k++) {
+ 				__asm__ __volatile__("nop");
+ 			}
+ 			if (sf2) {
+@@ -1009,6 +1011,8 @@ polaris_gpu_gmu_boot(void)
+ 			    *(volatile uint32_t *)(gpu + 0x14600u),
+ 			    *(volatile uint32_t *)(gpu + 0x14648u));
+ 		} else {
++			*(volatile uint32_t *)(gpu + 0x14618u) = 1u;	/* HFI_CTRL_INIT */
++			__asm__ __volatile__("dsb sy" ::: "memory");
+ 			for (i = 0; i < 200000u; i++) {
+ 				if (*(volatile uint32_t *)(gpu + 0x14600u) & 1u) {
+ 					break;
