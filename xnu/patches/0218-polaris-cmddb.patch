@@ -1,0 +1,116 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 9c4fbb5..da01c8a 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -772,6 +772,70 @@ polaris_oob(vm_offset_t gpu, uint32_t set, uint32_t ack)
+ 	return (info & (1u << ack)) ? 0 : -1;
+ }
+ 
++/* ---- RPMh command database: the per-resource level lists the PERF table
++ * votes must index (a6xx_gmu_rpmh_arc_votes_init). ---- */
++#define POLARIS_CMD_DB_PHYS 0x85fe0000ull
++#define POLARIS_CMD_DB_SIZE 0x20000u
++
++struct polaris_cmd_slave {
++	uint16_t id, header_offset, data_offset, count, version, reserved[3];
++};
++struct polaris_cmd_hdr {
++	uint32_t version;
++	uint8_t magic[4];
++	struct polaris_cmd_slave slave[8];
++	uint32_t checksum, reserved;
++	uint8_t data[];
++};
++struct polaris_cmd_entry {
++	char id[8];
++	uint32_t priority[2];
++	uint32_t address;
++	uint16_t length, offset;
++};
++
++static const uint16_t *
++polaris_cmd_levels(vm_offset_t db, const char *name, uint32_t *count)
++{
++	const struct polaris_cmd_hdr *h = (const struct polaris_cmd_hdr *)db;
++	char id[8];
++	uint32_t s, i, k;
++
++	for (k = 0; k < 8u; k++) {
++		id[k] = name[k];
++	}
++	for (s = 0; s < 8u; s++) {
++		const struct polaris_cmd_slave *sl = &h->slave[s];
++		const struct polaris_cmd_entry *e;
++
++		if (sl->id == 0u || sl->header_offset >= POLARIS_CMD_DB_SIZE - 0x1000u ||
++		    sl->count > 512u) {
++			continue;
++		}
++		e = (const struct polaris_cmd_entry *)((vm_offset_t)db + sl->header_offset);
++		for (i = 0; i < sl->count; i++) {
++			uint32_t same = 1u;
++
++			for (k = 0; k < 8u; k++) {
++				if (e[i].id[k] != id[k]) {
++					same = 0u;
++					break;
++				}
++			}
++			if (!same) {
++				continue;
++			}
++			if (e[i].length < 2u || e[i].length > 64u ||
++			    sl->data_offset + e[i].offset + e[i].length >= POLARIS_CMD_DB_SIZE - 0x1000u) {
++				return NULL;
++			}
++			*count = e[i].length / 2u;
++			return (const uint16_t *)((vm_offset_t)db + sl->data_offset + e[i].offset);
++		}
++	}
++	return NULL;
++}
++
+ void
+ polaris_gpu_gmu_boot(void)
+ {
+@@ -2191,8 +2255,38 @@ pt_done:			;
+ 		    *(volatile uint32_t *)(gpu + 0x143b0u),
+ 		    *(volatile uint32_t *)(gpu + 0x14340u));
+ 		*(volatile uint32_t *)(gpu + 0x8fe0u) = 0u;
+-		*(volatile uint32_t *)(gpu + 0x8fe4u) = 0u;
+-		*(volatile uint32_t *)(gpu + 0x8fe8u) = 0u;
++		{
++			vm_offset_t db2 = (vm_offset_t)ml_io_map(POLARIS_CMD_DB_PHYS, POLARIS_CMD_DB_SIZE);
++			uint32_t gc2 = 0u, mc2 = 0u, gi = 0u, mi = 0u, j;
++			const uint16_t *g2 = db2 ? polaris_cmd_levels(db2, "gfx.lvl", &gc2) : NULL;
++			const uint16_t *m2 = db2 ? polaris_cmd_levels(db2, "mx.lvl", &mc2) : NULL;
++			const struct polaris_cmd_hdr *h2 = (const struct polaris_cmd_hdr *)db2;
++
++			if (db2 != 0) {
++				printf("POLARIS DB: magic=%c%c%c%c gfx_entries=%u mx_entries=%u\n",
++				    h2->magic[0], h2->magic[1], h2->magic[2], h2->magic[3], gc2, mc2);
++			}
++			if (g2 != NULL) {
++				for (j = 0; j < gc2 && j < 10u; j++) {
++					printf("POLARIS DB: gfx.lvl[%u]=%u\n", j, g2[j]);
++				}
++				for (j = 0; j < gc2; j++) {
++					if (g2[j] >= 64u) { gi = j; break; }
++				}
++			}
++			if (m2 != NULL) {
++				for (j = 0; j < mc2 && j < 10u; j++) {
++					printf("POLARIS DB: mx.lvl[%u]=%u\n", j, m2[j]);
++				}
++				for (j = 0; j < mc2; j++) {
++					if (m2[j] >= 64u) { mi = j; break; }
++					else if (m2[j]) { mi = j; }
++				}
++			}
++			printf("POLARIS DB: rail idx gx=%u mx=%u (level 64)\n", gi, mi);
++			*(volatile uint32_t *)(gpu + 0x8fe4u) = gi;
++			*(volatile uint32_t *)(gpu + 0x8fe8u) = mi;
++		}
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+ 		printf("POLARIS GX: slumber_opt=0x%08x gx_idx=0x%08x mx_idx=0x%08x\n",
+ 		    *(volatile uint32_t *)(gpu + 0x8fe0u),
