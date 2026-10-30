@@ -1,0 +1,26 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 72b4274..1ba2bee 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -788,7 +788,7 @@ polaris_gpu_gmu_boot(void)
+ 	    *(volatile uint32_t *)(gpu + 0x24c14u));
+ 
+ 	/* 2b. RSC/PDC sequencer microcode (optin 35) */
+-	if (optin == 35 || optin == 36) {
++	if (optin == 35 || optin == 36 || (optin >= 44 && optin <= 50)) {
+ 		vm_offset_t pdc = ml_io_map(0xb200000ull, 0x300000);
+ 		if (pdc) {
+ 			polaris_rsc_ucode(gpu);
+@@ -1345,9 +1345,10 @@ polaris_gpu_gmu_boot(void)
+ 				}
+ 				__asm__ __volatile__("nop");
+ 			}
+-			printf("POLARIS BOOT: hfi_ctrl=0x%08x polls=%u info=0x%08x\n",
++			printf("POLARIS BOOT: hfi_ctrl=0x%08x polls=%u info=0x%08x ver=0x%08x\n",
+ 			    *(volatile uint32_t *)(gpu + 0x14600u), i,
+-			    *(volatile uint32_t *)(gpu + 0x14648u));
++			    *(volatile uint32_t *)(gpu + 0x14648u),
++			    *(volatile uint32_t *)(gpu + 0x14604u));
+ 			if (optin >= 46 && optin <= 50) {
+ 				vm_offset_t s6 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 
