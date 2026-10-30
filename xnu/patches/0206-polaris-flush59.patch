@@ -1,0 +1,13 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index ac0fc6c..876a31a 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1260,7 +1260,7 @@ polaris_gpu_gmu_boot(void)
+ 			} else {
+ 				polaris_hfi_build_va(0x60000000u);
+ 			}
+-			if (optin == 56 || optin == 58) {
++			if (optin == 56 || optin == 58 || optin == 59) {
+ 				uint32_t k4;
+ 				for (k4 = 0; k4 < 4u; k4++) {
+ 					polaris_pt_clean((vm_offset_t)polaris_hfi_tbl, 4096u);
