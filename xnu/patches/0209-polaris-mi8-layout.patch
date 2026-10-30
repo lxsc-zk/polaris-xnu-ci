@@ -1,0 +1,100 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 675abb1..6a8cbda 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1433,15 +1433,83 @@ polaris_gpu_gmu_boot(void)
+ 		printf("POLARIS HFI: QTBL_ADDR=0x60000000 INFO=1\n");
+ 	}
+ 
++	/* ---- optin 62: the whole A630 layout as the MI8 XNU driver drives it ----
++	 * table at 0x60009000 with size 168 BYTES, queues page aligned at
++	 * 0x6000A000/0x6000B000/0x6000C000, log at 0x60005000, debug at
++	 * 0x60001000, SFR 0x06030100, fence range 0x802800A0. */
++	if (optin == 62) {
++		vm_offset_t s8 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint8_t *b = polaris_scratch;
++		uint8_t *tt;
++		uint32_t k, i;
++
++		for (k = 0; k < 13u * 4096u; k++) {
++			b[k] = 0u;
++		}
++		tt = b + 0x9000u;
++		*(volatile uint32_t *)(tt + 0x00u) = 0u;
++		*(volatile uint32_t *)(tt + 0x04u) = 168u;	/* bytes, not dwords */
++		*(volatile uint32_t *)(tt + 0x08u) = 6u;
++		*(volatile uint32_t *)(tt + 0x0cu) = 12u;
++		*(volatile uint32_t *)(tt + 0x10u) = 3u;
++		*(volatile uint32_t *)(tt + 0x14u) = 3u;
++		for (i = 0; i < 3u; i++) {
++			uint32_t h = 0x18u + i * 48u;
++			uint32_t id = (i == 0u) ? 0u : ((i == 1u) ? 4u : 5u);
++
++			*(volatile uint32_t *)(tt + h + 0x00u) = 1u;
++			*(volatile uint32_t *)(tt + h + 0x04u) = 0x60009000u + 0x1000u * (i + 1u);
++			*(volatile uint32_t *)(tt + h + 0x08u) = (10u << 8) | id;
++			*(volatile uint32_t *)(tt + h + 0x0cu) = 1024u;
++			*(volatile uint32_t *)(tt + h + 0x18u) = 1u;
++			*(volatile uint32_t *)(tt + h + 0x1cu) = 1u;
++			*(volatile uint32_t *)(tt + h + 0x20u) = 1u;
++		}
++		for (k = 0; k < 13u; k++) {
++			polaris_pt_map(0x60000000ull + (uint64_t)k * 0x1000ull,
++			    kvtophys((vm_offset_t)(b + k * 4096u)));
++		}
++		polaris_pt_clean((vm_offset_t)b, 13u * 4096u);
++		printf("POLARIS MI8: table=0x60009000 size=168 q0=0x%08x q1=0x%08x q2=0x%08x\\n",
++		    *(volatile uint32_t *)(tt + 0x1cu),
++		    *(volatile uint32_t *)(tt + 0x4cu),
++		    *(volatile uint32_t *)(tt + 0x7cu));
++		if (s8) {
++			polaris_tcr_ps = 1u;
++			(void)polaris_smmu_space_on(s8, 1u, 1u, 5u);
++			*(volatile uint32_t *)(s8 + POLARIS_S2CR(2)) = 1u;
++			*(volatile uint32_t *)(s8 + POLARIS_SMR(2)) = 0x80000004u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++		}
++		*(volatile uint32_t *)(gpu + 0x14608u) = 0x06030100u;	/* HFI_SFR_ADDR */
++		*(volatile uint32_t *)(gpu + 0x24c44u) = 0x802800a0u;	/* AHB_FENCE_RANGE_0 */
++		*(volatile uint32_t *)(gpu + 0x14400u) = 0x60005003u;	/* PWR_COL_CP_MSG */
++		*(volatile uint32_t *)(gpu + 0x14404u) = 0u;		/* PWR_COL_CP_RESP */
++		*(volatile uint32_t *)(gpu + 0x13000u) = 1u;		/* ICACHE */
++		*(volatile uint32_t *)(gpu + 0x13004u) = 1u;		/* DCACHE */
++		*(volatile uint32_t *)(gpu + 0x1303cu) = 1u;		/* SYS_BUS */
++		*(volatile uint32_t *)(gpu + 0x140b4u) = 0x4052u;	/* CM3_CFG */
++		*(volatile uint32_t *)(gpu + 0x14300u) = 0x09c40400u;	/* INTER_FRAME_CTRL */
++		*(volatile uint32_t *)(gpu + 0x143a0u) |= 0x00000f11u;	/* RPMH */
++		*(volatile uint32_t *)(gpu + 0x14730u) = 1u;		/* GENERAL_7 */
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS MI8: sfr=0x%08x fence=0x%08x cpmsg=0x%08x\\n",
++		    *(volatile uint32_t *)(gpu + 0x14608u),
++		    *(volatile uint32_t *)(gpu + 0x24c44u),
++		    *(volatile uint32_t *)(gpu + 0x14400u));
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin >= 44 && optin <= 60) {
+-		*(volatile uint32_t *)(gpu + 0x14614u) = 0x60000000u;
++	if ((optin >= 44 && optin <= 60) || optin == 62) {
++		*(volatile uint32_t *)(gpu + 0x14614u) =
++		    (optin == 62) ? 0x60009000u : 0x60000000u;
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+-		printf("POLARIS HFI: QTBL_ADDR=0x60000000 (virtual) INFO=1\n");
++		printf("POLARIS HFI: QTBL_ADDR=0x%08x INFO=1\n",
++		    *(volatile uint32_t *)(gpu + 0x14614u));
+ 	} else if (optin == 38 || optin == 42) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) =
+ 		    (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl);
+@@ -1488,7 +1556,7 @@ polaris_gpu_gmu_boot(void)
+ 	    (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
+ 	if (v == 0xbabefaceu) {
+ 		/* official gmu_irq_enable: unmask message-queue and fault IRQs */
+-		if (optin == 60) {
++		if (optin == 60 || optin == 62) {
+ 			*(volatile uint32_t *)(gpu + 0x14648u) = 0xffffffffu;	/* INFO, write 1 to clear */
+ 			*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;	/* INTR_CLR */
+ 			printf("POLARIS BOOT: no INTR_MASK write, mask reads 0x%08x\n",
