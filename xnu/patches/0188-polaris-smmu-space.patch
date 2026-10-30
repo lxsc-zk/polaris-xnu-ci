@@ -1,0 +1,242 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 2265e89..81c25ec 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -308,6 +308,42 @@ polaris_hfi_build_pages(const uint32_t *pa_q)
+ 
+ /* Put every GPU/GMU stream into a BYPASS slot.  S2CR[0..4] already read back
+  * 0x000200ff (TYPE=2 bypass) and are not writable, so we only touch SMR. */
++/* Same table, but the queues are advertised at GMU virtual addresses so that
++ * the SMMU context can translate them. */
++static void
++polaris_hfi_build_va(uint32_t base_va)
++{
++	static const uint32_t ids[3] = { 0u, 4u, 5u };
++	static const uint32_t prio[3] = { 10u, 10u, 40u };
++	uint32_t i, b;
++
++	for (i = 0; i < 4096u; i += 4u) {
++		*(volatile uint32_t *)(polaris_hfi_tbl + i) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_q[0] + i) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_q[1] + i) = 0u;
++		*(volatile uint32_t *)(polaris_hfi_q[2] + i) = 0u;
++	}
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x00u) = 0u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x04u) = 42u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x08u) = 6u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x0cu) = 12u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x10u) = 3u;
++	*(volatile uint32_t *)(polaris_hfi_tbl + 0x14u) = 3u;
++	for (i = 0; i < 3u; i++) {
++		b = 0x18u + i * 48u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x00u) =
++		    base_va + (i + 1u) * 0x1000u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x04u) =
++		    (ids[i] & 0xffu) | ((prio[i] & 0xffu) << 8);
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x08u) = 1u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x0cu) = 1024u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x18u) = 1u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x1cu) = 1u;
++		*(volatile uint32_t *)(polaris_hfi_tbl + b + 0x20u) = 1u;
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++}
++
+ static void
+ polaris_smmu_bypass(vm_offset_t smmu)
+ {
+@@ -504,6 +540,140 @@ polaris_scm_call(uint64_t fnid, uint64_t arginfo, uint64_t a0, uint64_t a1,
+ 	return (int)(int64_t)r0;
+ }
+ 
++/* ---- SMMU stage-1 context bring-up, after hakios.adreno.c space_on() ---- */
++#define POLARIS_IDR0		0x020u
++#define POLARIS_IDR1		0x024u
++#define POLARIS_SMR(n)		(0x800u + 4u * (n))
++#define POLARIS_S2CR(n)		(0xc00u + 4u * (n))
++#define POLARIS_CBAR(n)		(0x1000u + 4u * (n))
++#define POLARIS_CBA2R(n)	(0x1800u + 4u * (n))
++#define POLARIS_CB_SCTLR	0x00u
++#define POLARIS_CB_TCR2		0x10u
++#define POLARIS_CB_TTBR0	0x20u
++#define POLARIS_CB_TTBR1	0x28u
++#define POLARIS_CB_TCR		0x30u
++#define POLARIS_CB_MAIR0	0x38u
++#define POLARIS_CB_MAIR1	0x3cu
++#define POLARIS_CB_FSR		0x58u
++#define POLARIS_CB_TLBIASID	0x610u
++#define POLARIS_CB_TLBSYNC	0x7f0u
++#define POLARIS_CB_TLBSTATUS	0x7f4u
++
++#define POLARIS_PTE_TABLE	1ull
++#define POLARIS_PTE_PAGE	3ull
++#define POLARIS_PTE_GMU		((2ull << 8) | (1ull << 10) | (1ull << 11))
++#define POLARIS_PTE_ADDR	0x0000fffffffff000ull
++
++#define POLARIS_CBAR_STAGE_1	((1u << 16) | (3u << 8) | (0xfu << 12))
++#define POLARIS_TCR_39		(25u | (1u << 8) | (1u << 10) | (3u << 12) | (1u << 23))
++#define POLARIS_TCR2		(1u | (1u << 4) | (7u << 15))
++#define POLARIS_MAIR0		0xf404ff44u
++#define POLARIS_SCTLR_ON	((1u << 0) | (1u << 1) | (1u << 2) | (1u << 5) | (1u << 12))
++#define POLARIS_FSR_ALL		0xc00001feu
++
++static uint64_t polaris_pt_root[512] __attribute__((aligned(4096)));
++static uint64_t polaris_pt_l2[512] __attribute__((aligned(4096)));
++static uint64_t polaris_pt_l3[512] __attribute__((aligned(4096)));
++
++extern addr64_t kvtophys(vm_offset_t);
++
++static void
++polaris_pt_clean(vm_offset_t start, vm_size_t size)
++{
++	vm_offset_t line;
++
++	for (line = start & ~(vm_offset_t)63; line < start + size; line += 64) {
++		__asm__ __volatile__("dc civac, %0" : : "r"(line));
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++}
++
++static void
++polaris_pt_map(uint64_t va, uint64_t pa)
++{
++	polaris_pt_root[(va >> 30) & 0x1ffu] = kvtophys((vm_offset_t)polaris_pt_l2) |
++	    POLARIS_PTE_TABLE;
++	polaris_pt_l2[(va >> 21) & 0x1ffu] = kvtophys((vm_offset_t)polaris_pt_l3) |
++	    POLARIS_PTE_TABLE;
++	polaris_pt_l3[(va >> 12) & 0x1ffu] = (pa & POLARIS_PTE_ADDR) |
++	    POLARIS_PTE_GMU | POLARIS_PTE_PAGE;
++}
++
++static int
++polaris_smmu_space_on(vm_offset_t s, uint32_t ctx, uint32_t match, uint32_t stream)
++{
++	uint32_t idr1, idr0, page, pages, cb, i;
++	uint64_t root;
++
++	idr0 = *(volatile uint32_t *)(s + POLARIS_IDR0);
++	idr1 = *(volatile uint32_t *)(s + POLARIS_IDR1);
++	page = (idr1 >> 31) ? 0x10000u : 0x1000u;
++	pages = 2u << ((idr1 >> 28) & 7u);
++	printf("POLARIS SPACE: idr0=0x%08x idr1=0x%08x page=0x%x pages=%u ctxs=%u matches=%u\n",
++	    idr0, idr1, page, pages, idr1 & 0xffu, idr0 & 0xffu);
++	if (2u * pages * page != POLARIS_SMMU_LEN) {
++		printf("POLARIS SPACE: layout mismatch, %u bytes expected\n",
++		    2u * pages * page);
++		return -1;
++	}
++	cb = (pages + ctx) * page;
++
++	polaris_pt_clean((vm_offset_t)polaris_pt_root, sizeof(polaris_pt_root));
++	polaris_pt_clean((vm_offset_t)polaris_pt_l2, sizeof(polaris_pt_l2));
++	polaris_pt_clean((vm_offset_t)polaris_pt_l3, sizeof(polaris_pt_l3));
++	root = kvtophys((vm_offset_t)polaris_pt_root) | ((uint64_t)ctx << 48);
++
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_SCTLR) = 0u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	*(volatile uint32_t *)(s + POLARIS_CBA2R(ctx)) = 1u;
++	*(volatile uint32_t *)(s + POLARIS_CBAR(ctx)) = POLARIS_CBAR_STAGE_1;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TCR2) = POLARIS_TCR2;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TCR) = POLARIS_TCR_39;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TTBR0) = (uint32_t)root;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TTBR0 + 4u) = (uint32_t)(root >> 32);
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TTBR1) = 0u;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TTBR1 + 4u) = 0u;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_MAIR0) = POLARIS_MAIR0;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_MAIR1) = 0u;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_FSR) = POLARIS_FSR_ALL;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TLBIASID) = ctx;
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_TLBSYNC) = 1u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (i = 0; i < 100000u; i++) {
++		if (!(*(volatile uint32_t *)(s + cb + POLARIS_CB_TLBSTATUS) & 1u)) {
++			break;
++		}
++		__asm__ __volatile__("nop");
++	}
++	printf("POLARIS SPACE: cb%u base=0x%x tlbstatus polls=%u\n", ctx, cb, i);
++	*(volatile uint32_t *)(s + cb + POLARIS_CB_SCTLR) = POLARIS_SCTLR_ON;
++	*(volatile uint32_t *)(s + POLARIS_S2CR(match)) = ctx;
++	*(volatile uint32_t *)(s + POLARIS_SMR(match)) = 0x80000000u |
++	    (0x400u << 16) | stream;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++
++	printf("POLARIS SPACE: cb%u sctlr=0x%08x ttbr0=0x%08x/%08x tcr=0x%08x tcr2=0x%08x\n",
++	    ctx, *(volatile uint32_t *)(s + cb + POLARIS_CB_SCTLR),
++	    *(volatile uint32_t *)(s + cb + POLARIS_CB_TTBR0 + 4u),
++	    *(volatile uint32_t *)(s + cb + POLARIS_CB_TTBR0),
++	    *(volatile uint32_t *)(s + cb + POLARIS_CB_TCR),
++	    *(volatile uint32_t *)(s + cb + POLARIS_CB_TCR2));
++	printf("POLARIS SPACE: cbar=0x%08x cba2r=0x%08x smr=0x%08x s2cr=0x%08x\n",
++	    *(volatile uint32_t *)(s + POLARIS_CBAR(ctx)),
++	    *(volatile uint32_t *)(s + POLARIS_CBA2R(ctx)),
++	    *(volatile uint32_t *)(s + POLARIS_SMR(match)),
++	    *(volatile uint32_t *)(s + POLARIS_S2CR(match)));
++	if (*(volatile uint32_t *)(s + POLARIS_SMR(match)) !=
++	    (0x80000000u | (0x400u << 16) | stream) ||
++	    (*(volatile uint32_t *)(s + POLARIS_S2CR(match)) & 0x300ffu) != ctx ||
++	    !(*(volatile uint32_t *)(s + cb + POLARIS_CB_SCTLR) & 1u)) {
++		printf("POLARIS SPACE: SMMU REJECTED the configuration\n");
++		return -1;
++	}
++	printf("POLARIS SPACE: context %u carries stream %u\n", ctx, stream);
++	return 0;
++}
++
+ void
+ polaris_gpu_gmu_boot(void)
+ {
+@@ -519,7 +689,7 @@ polaris_gpu_gmu_boot(void)
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+ 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
+-	    optin != 42 && optin != 43) {
++	    optin != 42 && optin != 43 && optin != 44) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -987,11 +1157,43 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 
++	/* ---- optin 44: give the GMU a stage-1 context of our own ---- */
++	if (optin == 44) {
++		vm_offset_t s4 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint32_t k;
++		uint64_t pa;
++
++		if (!s4) {
++			printf("POLARIS SPACE: smmu map failed\n");
++		} else {
++			static const vm_offset_t pg[4] = {
++				(vm_offset_t)polaris_hfi_tbl,
++				(vm_offset_t)polaris_hfi_q[0],
++				(vm_offset_t)polaris_hfi_q[1],
++				(vm_offset_t)polaris_hfi_q[2]
++			};
++			for (k = 0; k < 4u; k++) {
++				pa = kvtophys(pg[k]);
++				polaris_pt_map(0x60000000ull + (uint64_t)k * 0x1000ull, pa);
++				printf("POLARIS SPACE: va 0x%llx -> pa 0x%llx\n",
++				    (unsigned long long)(0x60000000ull + (uint64_t)k * 0x1000ull),
++				    (unsigned long long)pa);
++			}
++			polaris_hfi_build_va(0x60000000u);
++			(void)polaris_smmu_space_on(s4, 1u, 1u, 5u);
++		}
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin == 38 || optin == 42) {
++	if (optin == 44) {
++		*(volatile uint32_t *)(gpu + 0x14614u) = 0x60000000u;
++		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS HFI: QTBL_ADDR=0x60000000 (virtual) INFO=1\n");
++	} else if (optin == 38 || optin == 42) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) =
+ 		    (uint32_t)ml_static_vtop((vm_offset_t)polaris_hfi_tbl);
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
