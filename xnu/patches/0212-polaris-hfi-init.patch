@@ -1,0 +1,95 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index fed23f2..b00f88f 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -717,7 +717,7 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 50 && optin != 51 && optin != 52 && optin != 53 &&
+ 	    optin != 54 && optin != 55 && optin != 56 && optin != 57 &&
+ 	    optin != 58 && optin != 59 && optin != 60 && optin != 61 &&
+-	    optin != 62) {
++	    optin != 62 && optin != 63) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -1442,7 +1442,7 @@ polaris_gpu_gmu_boot(void)
+ 	 * table 0x60009000 with size 168 BYTES, queues page aligned at
+ 	 * A000/B000/C000, log 0x60005000, debug 0x60001000, SFR 0x06030100,
+ 	 * fence range 0x802800A0. */
+-	if (optin == 62) {
++	if (optin == 62 || optin == 63) {
+ 		vm_offset_t s8 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		uint8_t *b = polaris_scratch;
+ 		uint8_t *tt;
+@@ -1509,9 +1509,9 @@ polaris_gpu_gmu_boot(void)
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if ((optin >= 44 && optin <= 61) || optin == 62) {
++	if ((optin >= 44 && optin <= 61) || optin == 62 || optin == 63) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) =
+-		    (optin == 62) ? 0x60009000u : 0x60000000u;
++		    (optin == 62 || optin == 63) ? 0x60009000u : 0x60000000u;
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+ 		printf("POLARIS HFI: QTBL_ADDR=0x60000000 (virtual) INFO=1\n");
+@@ -1561,7 +1561,7 @@ polaris_gpu_gmu_boot(void)
+ 	    (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
+ 	if (v == 0xbabefaceu) {
+ 		/* official gmu_irq_enable: unmask message-queue and fault IRQs */
+-		if (optin == 60 || optin == 61 || optin == 62) {
++		if (optin >= 60 && optin <= 63) {
+ 			*(volatile uint32_t *)(gpu + 0x14648u) = 0xffffffffu;	/* INFO, write 1 to clear */
+ 			*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;	/* INTR_CLR */
+ 			printf("POLARIS BOOT: no INTR_MASK write, mask reads 0x%08x\n",
+@@ -1925,6 +1925,51 @@ pt_done:			;
+ 			    *(volatile uint32_t *)(b + 0x10C4u));
+ 		}
+ 	}
++	if (optin == 63 && v == 0xbabefaceu) {
++		uint8_t *b = polaris_scratch;
++		uint8_t *tt = b + 0x9000u;
++		uint32_t *q0 = (uint32_t *)(b + 0xA000u);
++		uint32_t *q1 = (uint32_t *)(b + 0xB000u);
++		uint32_t h0w = *(volatile uint32_t *)(tt + 0x18u + 0x2cu);
++		uint32_t h0r = *(volatile uint32_t *)(tt + 0x18u + 0x28u);
++		uint32_t h1r = *(volatile uint32_t *)(tt + 0x48u + 0x28u);
++		uint32_t h1w = *(volatile uint32_t *)(tt + 0x48u + 0x2cu);
++		uint32_t msg[5], k6, info6 = 0u, idx;
++
++		printf("POLARIS HFI5: status=0x%08x q0 rd=%u wr=%u q1 rd=%u wr=%u\n",
++		    *(volatile uint32_t *)(gpu + 0x14600u), h0r, h0w, h1r, h1w);
++		msg[0] = (1u << 20) | (5u << 8) | 0u;
++		msg[1] = 0u;
++		msg[2] = 0x60001000u;
++		msg[3] = 0x4000u;
++		msg[4] = 1u;
++		idx = h0w & 1023u;
++		for (k6 = 0; k6 < 5u; k6++) {
++			q0[idx] = msg[k6];
++			idx = (idx + 1u) & 1023u;
++		}
++		*(volatile uint32_t *)(tt + 0x18u + 0x2cu) = idx;
++		polaris_pt_clean((vm_offset_t)b, 13u * 4096u);
++		*(volatile uint32_t *)(gpu + 0x14650u) = 1u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		for (k6 = 0; k6 < 2000000u; k6++) {
++			info6 = *(volatile uint32_t *)(gpu + 0x14648u);
++			if (info6 & 1u) {
++				break;
++			}
++		}
++		printf("POLARIS HFI5: INIT info=0x%08x polls=%u %s\n", info6, k6,
++		    (info6 & 1u) ? "ANSWERED" : "NO-ANSWER");
++		if (info6 & 1u) {
++			uint32_t ri = h1r & 1023u;
++
++			*(volatile uint32_t *)(gpu + 0x14644u) = 1u;
++			polaris_pt_clean((vm_offset_t)b, 13u * 4096u);
++			printf("POLARIS HFI5: resp %08x %08x %08x %08x\n",
++			    q1[ri], q1[(ri + 1u) & 1023u], q1[(ri + 2u) & 1023u],
++			    q1[(ri + 3u) & 1023u]);
++		}
++	}
+ 	printf("POLARIS BOOT: GX=0x%08x CX=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpucc + 0x100cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x106cu));
