@@ -1,0 +1,97 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 9cd78bd..eae3209 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -715,7 +715,7 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 42 && optin != 43 && optin != 44 && optin != 45 &&
+ 	    optin != 46 && optin != 47 && optin != 48 && optin != 49 &&
+ 	    optin != 50 && optin != 51 && optin != 52 && optin != 53 &&
+-	    optin != 54) {
++	    optin != 54 && optin != 55) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -1184,7 +1184,7 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 
+ 	/* ---- optin 44: give the GMU a stage-1 context of our own ---- */
+-	if (optin >= 44 && optin <= 53) {
++	if (optin >= 44 && optin <= 55) {
+ 		vm_offset_t s4 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		uint32_t k;
+ 		uint64_t pa;
+@@ -1205,7 +1205,7 @@ polaris_gpu_gmu_boot(void)
+ 				    (unsigned long long)(0x60000000ull + (uint64_t)k * 0x1000ull),
+ 				    (unsigned long long)pa);
+ 			}
+-			if (optin >= 51 && optin <= 53) {
++			if (optin >= 51 && optin <= 55) {
+ 				for (k = 0; k < 4u; k++) {
+ 					pa = kvtophys((vm_offset_t)polaris_hfi_log[k]);
+ 					polaris_pt_map(0x60004000ull + (uint64_t)k * 0x1000ull, pa);
+@@ -1229,10 +1229,36 @@ polaris_gpu_gmu_boot(void)
+ 				    *(volatile uint32_t *)(gpu + 0x140b4u),
+ 				    *(volatile uint32_t *)(gpu + 0x14400u));
+ 			}
+-			if (optin >= 49 && optin <= 53) {
++			if (optin >= 49 && optin <= 55) {
+ 				polaris_tcr_ps = 1u;
+ 			}
+-			polaris_hfi_build_va(0x60000000u);
++			if (optin == 55) {
++				uint32_t k3, b3;
++				for (k3 = 0; k3 < 4096u; k3 += 4u) {
++					*(volatile uint32_t *)(polaris_hfi_tbl + k3) = 0u;
++				}
++				*(volatile uint32_t *)(polaris_hfi_tbl + 0x00u) = 0u;
++				*(volatile uint32_t *)(polaris_hfi_tbl + 0x04u) = 210u;
++				*(volatile uint32_t *)(polaris_hfi_tbl + 0x08u) = 6u;
++				*(volatile uint32_t *)(polaris_hfi_tbl + 0x0cu) = 12u;
++				*(volatile uint32_t *)(polaris_hfi_tbl + 0x10u) = 3u;
++				*(volatile uint32_t *)(polaris_hfi_tbl + 0x14u) = 3u;
++				for (k3 = 0; k3 < 3u; k3++) {
++					b3 = 0x18u + k3 * 48u;
++					*(volatile uint32_t *)(polaris_hfi_tbl + b3 + 0x00u) =
++					    0x60000000u + 848u + k3 * 4096u;
++					*(volatile uint32_t *)(polaris_hfi_tbl + b3 + 0x04u) =
++					    k3 | (((k3 == 2u) ? 40u : 10u) << 8);
++					*(volatile uint32_t *)(polaris_hfi_tbl + b3 + 0x0cu) = 1024u;
++					*(volatile uint32_t *)(polaris_hfi_tbl + b3 + 0x08u) = 1u;
++				}
++				printf("POLARIS HFI: vendor layout words=210 q0=0x%08x q1=0x%08x q2=0x%08x\n",
++				    *(volatile uint32_t *)(polaris_hfi_tbl + 0x18u),
++				    *(volatile uint32_t *)(polaris_hfi_tbl + 0x48u),
++				    *(volatile uint32_t *)(polaris_hfi_tbl + 0x78u));
++			} else {
++				polaris_hfi_build_va(0x60000000u);
++			}
+ 			if (optin == 50) {
+ 				printf("POLARIS HFI: hdr=%08x %08x %08x %08x %08x %08x\n",
+ 				    *(volatile uint32_t *)(polaris_hfi_tbl + 0x00u),
+@@ -1248,7 +1274,7 @@ polaris_gpu_gmu_boot(void)
+ 				    *(volatile uint32_t *)(polaris_hfi_tbl + 0x78u));
+ 			}
+ 			(void)polaris_smmu_space_on(s4, 1u, 1u, 5u);
+-			if (optin >= 46 && optin <= 53) {
++			if (optin >= 46 && optin <= 55) {
+ 				/* gmu_user may be the one the firmware fetches with */
+ 				*(volatile uint32_t *)(s4 + POLARIS_S2CR(2)) = 1u;
+ 				*(volatile uint32_t *)(s4 + POLARIS_SMR(2)) = 0x80000004u;
+@@ -1328,7 +1354,7 @@ polaris_gpu_gmu_boot(void)
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin >= 44 && optin <= 53) {
++	if (optin >= 44 && optin <= 55) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) = 0x60000000u;
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+@@ -1472,7 +1498,7 @@ polaris_gpu_gmu_boot(void)
+ 					    *(volatile uint32_t *)&polaris_hfi_log[0][j * 16u + 12u]);
+ 				}
+ 			}
+-			if (optin >= 46 && optin <= 53) {
++			if (optin >= 46 && optin <= 55) {
+ 				vm_offset_t s6 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 
+ 				if (s6) {
