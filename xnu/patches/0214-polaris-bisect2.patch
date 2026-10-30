@@ -1,0 +1,46 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index d668d13..2a2729e 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1566,6 +1566,15 @@ polaris_gpu_gmu_boot(void)
+ 			*(volatile uint32_t *)(s9 + POLARIS_SMR(2)) = 0x80000004u;
+ 			__asm__ __volatile__("dsb sy" ::: "memory");
+ 		}
++		if (var & 64u) {
++			vm_offset_t pd = ml_io_map(0xb200000ull, 0x300000);
++
++			if (pd) {
++				polaris_rsc_ucode(gpu);
++				polaris_pdc_ucode(pd);
++				printf("POLARIS BISECT: rsc/pdc ucode run\n");
++			}
++		}
+ 		*(volatile uint32_t *)(gpu + 0x14608u) = (var & 16u) ? 0x06030100u : 0x06030000u;
+ 		*(volatile uint32_t *)(gpu + 0x24c44u) = (var & 32u) ? 0x802800a0u : 0x80a008a0u;
+ 		*(volatile uint32_t *)(gpu + 0x14400u) = (var & 8u) ? 0x60005003u : 0x60004003u;
+@@ -1641,9 +1650,22 @@ polaris_gpu_gmu_boot(void)
+ 	    (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
+ 	if (v == 0xbabefaceu) {
+ 		/* official gmu_irq_enable: unmask message-queue and fault IRQs */
+-		if (optin >= 60 && optin <= 64) {
+-			*(volatile uint32_t *)(gpu + 0x14648u) = 0xffffffffu;	/* INFO, write 1 to clear */
+-			*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;	/* INTR_CLR */
++		if (optin == 64) {
++			uint32_t vv = 0u;
++
++			(void)PE_parse_boot_argn("polarisvar", &vv, sizeof(vv));
++			*(volatile uint32_t *)(gpu + 0x14648u) = 0xffffffffu;
++			*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;
++			if (vv & 128u) {
++				*(volatile uint32_t *)(gpu + 0x1464cu) = 0xff7ffffeu;
++				printf("POLARIS BISECT: INTR_MASK written 0xff7ffffe\n");
++			} else {
++				printf("POLARIS BISECT: no INTR_MASK write, mask reads 0x%08x\n",
++				    *(volatile uint32_t *)(gpu + 0x1464cu));
++			}
++		} else if (optin >= 60 && optin <= 63) {
++			*(volatile uint32_t *)(gpu + 0x14648u) = 0xffffffffu;
++			*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;
+ 			printf("POLARIS BOOT: no INTR_MASK write, mask reads 0x%08x\n",
+ 			    *(volatile uint32_t *)(gpu + 0x1464cu));
+ 		} else {
