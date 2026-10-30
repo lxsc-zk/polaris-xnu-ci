@@ -1,0 +1,40 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 9c4fbb5..c7d749e 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -792,7 +792,34 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 50 && optin != 51 && optin != 52 && optin != 53 &&
+ 	    optin != 54 && optin != 55 && optin != 56 && optin != 57 &&
+ 	    optin != 58 && optin != 59 && optin != 60 && optin != 61 &&
+-	    optin != 62 && optin != 63 && optin != 64) {
++	    optin != 62 && optin != 63 && optin != 64 && optin != 67) {
++		return;
++	}
++	if (optin == 67) {
++		vm_offset_t win = ml_io_map(0x84000000ull, 0x4000000ull);
++		uint32_t off, hits = 0u;
++
++		if (win == 0) {
++			printf("POLARIS DB: map failed\n");
++			return;
++		}
++		printf("POLARIS DB: scanning 0x84000000..0x88000000 for db 30 03 0c\n");
++		for (off = 0; off < 0x4000000u; off += 0x1000u) {
++			volatile uint8_t *q = (volatile uint8_t *)(win + off);
++
++			if (q[4] == 0xdbu && q[5] == 0x30u && q[6] == 0x03u && q[7] == 0x0cu) {
++				uint32_t ver = (uint32_t)q[0] | ((uint32_t)q[1] << 8) |
++				    ((uint32_t)q[2] << 16) | ((uint32_t)q[3] << 24);
++
++				printf("POLARIS DB: HIT at 0x%08x version=%u\n",
++				    0x84000000u + off, ver);
++				hits++;
++				if (hits >= 4u) {
++					break;
++				}
++			}
++		}
++		printf("POLARIS DB: scan done, %u hit(s)\n", hits);
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
