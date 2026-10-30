@@ -1,0 +1,72 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 81c25ec..d06070d 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -648,9 +648,27 @@ polaris_smmu_space_on(vm_offset_t s, uint32_t ctx, uint32_t match, uint32_t stre
+ 	printf("POLARIS SPACE: cb%u base=0x%x tlbstatus polls=%u\n", ctx, cb, i);
+ 	*(volatile uint32_t *)(s + cb + POLARIS_CB_SCTLR) = POLARIS_SCTLR_ON;
+ 	*(volatile uint32_t *)(s + POLARIS_S2CR(match)) = ctx;
+-	*(volatile uint32_t *)(s + POLARIS_SMR(match)) = 0x80000000u |
+-	    (0x400u << 16) | stream;
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
++	/* The mask field is not always as wide as the one SM8150 accepts: find the
++	 * widest one this SMMU will take, starting with an exact match. */
++	{
++		static const uint32_t masks[] = { 0x000u, 0x100u, 0x3ffu, 0x400u };
++		uint32_t m, want;
++
++		for (m = 0; m < sizeof(masks) / sizeof(masks[0]); m++) {
++			want = 0x80000000u | (masks[m] << 16) | stream;
++			*(volatile uint32_t *)(s + POLARIS_SMR(match)) = want;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS SPACE: smr mask 0x%03x wrote 0x%08x read 0x%08x %s\n",
++			    masks[m], want,
++			    *(volatile uint32_t *)(s + POLARIS_SMR(match)),
++			    (*(volatile uint32_t *)(s + POLARIS_SMR(match)) == want) ?
++			    "OK" : "REJECTED");
++			if (*(volatile uint32_t *)(s + POLARIS_SMR(match)) == want) {
++				break;
++			}
++		}
++	}
+ 
+ 	printf("POLARIS SPACE: cb%u sctlr=0x%08x ttbr0=0x%08x/%08x tcr=0x%08x tcr2=0x%08x\n",
+ 	    ctx, *(volatile uint32_t *)(s + cb + POLARIS_CB_SCTLR),
+@@ -663,8 +681,8 @@ polaris_smmu_space_on(vm_offset_t s, uint32_t ctx, uint32_t match, uint32_t stre
+ 	    *(volatile uint32_t *)(s + POLARIS_CBA2R(ctx)),
+ 	    *(volatile uint32_t *)(s + POLARIS_SMR(match)),
+ 	    *(volatile uint32_t *)(s + POLARIS_S2CR(match)));
+-	if (*(volatile uint32_t *)(s + POLARIS_SMR(match)) !=
+-	    (0x80000000u | (0x400u << 16) | stream) ||
++	if (!(*(volatile uint32_t *)(s + POLARIS_SMR(match)) & 0x80000000u) ||
++	    (*(volatile uint32_t *)(s + POLARIS_SMR(match)) & 0xffffu) != stream ||
+ 	    (*(volatile uint32_t *)(s + POLARIS_S2CR(match)) & 0x300ffu) != ctx ||
+ 	    !(*(volatile uint32_t *)(s + cb + POLARIS_CB_SCTLR) & 1u)) {
+ 		printf("POLARIS SPACE: SMMU REJECTED the configuration\n");
+@@ -689,7 +707,7 @@ polaris_gpu_gmu_boot(void)
+ 	(void)PE_parse_boot_argn("polarisgpu", &optin, sizeof(optin));
+ 	if (optin != 34 && optin != 35 && optin != 36 && optin != 37 &&
+ 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
+-	    optin != 42 && optin != 43 && optin != 44) {
++	    optin != 42 && optin != 43 && optin != 44 && optin != 45) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -1158,7 +1176,7 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 
+ 	/* ---- optin 44: give the GMU a stage-1 context of our own ---- */
+-	if (optin == 44) {
++	if (optin == 44 || optin == 45) {
+ 		vm_offset_t s4 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		uint32_t k;
+ 		uint64_t pa;
+@@ -1188,7 +1206,7 @@ polaris_gpu_gmu_boot(void)
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin == 44) {
++	if (optin == 44 || optin == 45) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) = 0x60000000u;
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
