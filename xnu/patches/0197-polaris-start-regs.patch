@@ -1,0 +1,90 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 1ba2bee..a5034a9 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -265,6 +265,7 @@ polaris_hfi_put(uint32_t off, uint32_t v)
+  * physical start address, which is what the GMU sees in SMMU bypass mode. */
+ static uint8_t polaris_hfi_tbl[4096] __attribute__((aligned(4096)));
+ static uint8_t polaris_hfi_q[3][4096] __attribute__((aligned(4096)));
++static uint8_t polaris_hfi_log[4][4096] __attribute__((aligned(4096)));
+ 
+ static void
+ polaris_hfi_build_pages(const uint32_t *pa_q)
+@@ -712,7 +713,7 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
+ 	    optin != 42 && optin != 43 && optin != 44 && optin != 45 &&
+ 	    optin != 46 && optin != 47 && optin != 48 && optin != 49 &&
+-	    optin != 50) {
++	    optin != 50 && optin != 51) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -1181,7 +1182,7 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 
+ 	/* ---- optin 44: give the GMU a stage-1 context of our own ---- */
+-	if (optin >= 44 && optin <= 50) {
++	if (optin >= 44 && optin <= 51) {
+ 		vm_offset_t s4 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		uint32_t k;
+ 		uint64_t pa;
+@@ -1202,7 +1203,31 @@ polaris_gpu_gmu_boot(void)
+ 				    (unsigned long long)(0x60000000ull + (uint64_t)k * 0x1000ull),
+ 				    (unsigned long long)pa);
+ 			}
+-			if (optin == 49 || optin == 50) {
++			if (optin == 51) {
++				for (k = 0; k < 4u; k++) {
++					pa = kvtophys((vm_offset_t)polaris_hfi_log[k]);
++					polaris_pt_map(0x60004000ull + (uint64_t)k * 0x1000ull, pa);
++					printf("POLARIS SPACE: log va 0x%llx -> pa 0x%llx\n",
++					    (unsigned long long)(0x60004000ull + (uint64_t)k * 0x1000ull),
++					    (unsigned long long)pa);
++				}
++				/* the registers a6xx_gmu_fw_start writes before releasing reset */
++				*(volatile uint32_t *)(gpu + 0x13000u) = 1u;
++				*(volatile uint32_t *)(gpu + 0x13004u) = 1u;
++				*(volatile uint32_t *)(gpu + 0x143c0u) = 1u;
++				*(volatile uint32_t *)(gpu + 0x143c4u) = 1u;
++				*(volatile uint32_t *)(gpu + 0x14400u) = 0x60004000u | 3u;
++				*(volatile uint32_t *)(gpu + 0x14404u) = 0u;
++				*(volatile uint32_t *)(gpu + 0x140b4u) = 0x4052u;
++				*(volatile uint32_t *)(gpu + 0x114u) = 0u;
++				__asm__ __volatile__("dsb sy" ::: "memory");
++				printf("POLARIS HFI: icache=0x%08x dcache=0x%08x cm3cfg=0x%08x cpmsg=0x%08x\n",
++				    *(volatile uint32_t *)(gpu + 0x13000u),
++				    *(volatile uint32_t *)(gpu + 0x13004u),
++				    *(volatile uint32_t *)(gpu + 0x140b4u),
++				    *(volatile uint32_t *)(gpu + 0x14400u));
++			}
++			if (optin >= 49 && optin <= 51) {
+ 				polaris_tcr_ps = 1u;
+ 			}
+ 			polaris_hfi_build_va(0x60000000u);
+@@ -1221,7 +1246,7 @@ polaris_gpu_gmu_boot(void)
+ 				    *(volatile uint32_t *)(polaris_hfi_tbl + 0x78u));
+ 			}
+ 			(void)polaris_smmu_space_on(s4, 1u, 1u, 5u);
+-			if (optin >= 46 && optin <= 50) {
++			if (optin >= 46 && optin <= 51) {
+ 				/* gmu_user may be the one the firmware fetches with */
+ 				*(volatile uint32_t *)(s4 + POLARIS_S2CR(2)) = 1u;
+ 				*(volatile uint32_t *)(s4 + POLARIS_SMR(2)) = 0x80000004u;
+@@ -1241,7 +1266,7 @@ polaris_gpu_gmu_boot(void)
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin >= 44 && optin <= 50) {
++	if (optin >= 44 && optin <= 51) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) = 0x60000000u;
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+@@ -1349,7 +1374,7 @@ polaris_gpu_gmu_boot(void)
+ 			    *(volatile uint32_t *)(gpu + 0x14600u), i,
+ 			    *(volatile uint32_t *)(gpu + 0x14648u),
+ 			    *(volatile uint32_t *)(gpu + 0x14604u));
+-			if (optin >= 46 && optin <= 50) {
++			if (optin >= 46 && optin <= 51) {
+ 				vm_offset_t s6 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 
+ 				if (s6) {
