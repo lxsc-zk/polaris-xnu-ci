@@ -1,0 +1,125 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index b00f88f..d668d13 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -574,6 +574,7 @@ polaris_scm_call(uint64_t fnid, uint64_t arginfo, uint64_t a0, uint64_t a1,
+ #define POLARIS_FSR_ALL		0xc00001feu
+ 
+ static uint32_t polaris_tcr_ps = 0u;
++static uint32_t polaris_qtbl_va = 0x60000000u;
+ 
+ static uint64_t polaris_pt_root[512] __attribute__((aligned(4096)));
+ static uint64_t polaris_pt_l2[512] __attribute__((aligned(4096)));
+@@ -717,7 +718,7 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 50 && optin != 51 && optin != 52 && optin != 53 &&
+ 	    optin != 54 && optin != 55 && optin != 56 && optin != 57 &&
+ 	    optin != 58 && optin != 59 && optin != 60 && optin != 61 &&
+-	    optin != 62 && optin != 63) {
++	    optin != 62 && optin != 63 && optin != 64) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -1505,13 +1506,92 @@ polaris_gpu_gmu_boot(void)
+ 		    *(volatile uint32_t *)(gpu + 0x140b4u));
+ 	}
+ 
++	/* ---- optin 64: the same six A630 differences, each switchable at boot
++	 * with polarisvar bit 0..5, so one kernel can bisect them:
++	 *   bit0 (1)  table size 168 instead of 42
++	 *   bit1 (2)  queues page aligned instead of packed after the header
++	 *   bit2 (4)  queue 2 priority 10 instead of 40
++	 *   bit3 (8)  table at 0x60009000 and log at 0x60005000
++	 *   bit4 (16) HFI_SFR_ADDR 0x06030100 instead of 0x06030000
++	 *   bit5 (32) AHB_FENCE_RANGE_0 0x802800A0 instead of 0x80A008A0
++	 * polarisvar 63 (0x3f) is the MI8 set, 0 is the old one. ---- */
++	if (optin == 64) {
++		vm_offset_t s9 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
++		uint8_t *b = polaris_scratch;
++		uint8_t *tt = b;
++		uint32_t var = 0u, k, i, tva;
++
++		(void)PE_parse_boot_argn("polarisvar", &var, sizeof(var));
++		tva = (var & 8u) ? 0x60009000u : 0x60000000u;
++		polaris_qtbl_va = tva;
++		tt = b + (tva - 0x60000000u);
++		for (k = 0; k < 13u * 4096u; k++) {
++			b[k] = 0u;
++		}
++		*(volatile uint32_t *)(tt + 0x00u) = 0u;
++		*(volatile uint32_t *)(tt + 0x04u) = (var & 1u) ? 168u : 42u;
++		*(volatile uint32_t *)(tt + 0x08u) = 6u;
++		*(volatile uint32_t *)(tt + 0x0cu) = 12u;
++		*(volatile uint32_t *)(tt + 0x10u) = 3u;
++		*(volatile uint32_t *)(tt + 0x14u) = 3u;
++		for (i = 0; i < 3u; i++) {
++			uint32_t h = 0x18u + i * 48u;
++			uint32_t id = (i == 0u) ? 0u : ((i == 1u) ? 4u : 5u);
++			uint32_t prio = ((i == 2u) && !(var & 4u)) ? 40u : 10u;
++			uint32_t qa = (var & 2u) ? (tva + 0x1000u * (i + 1u))
++						 : (tva + 168u + i * 4112u);
++
++			*(volatile uint32_t *)(tt + h + 0x00u) = 1u;
++			*(volatile uint32_t *)(tt + h + 0x04u) = qa;
++			*(volatile uint32_t *)(tt + h + 0x08u) = (prio << 8) | id;
++			*(volatile uint32_t *)(tt + h + 0x0cu) = 1024u;
++			*(volatile uint32_t *)(tt + h + 0x18u) = 1u;
++			*(volatile uint32_t *)(tt + h + 0x1cu) = 1u;
++			*(volatile uint32_t *)(tt + h + 0x20u) = 1u;
++		}
++		for (k = 0; k < 13u; k++) {
++			polaris_pt_map(0x60000000ull + (uint64_t)k * 0x1000ull,
++			    kvtophys((vm_offset_t)(b + k * 4096u)));
++		}
++		polaris_pt_clean((vm_offset_t)b, 13u * 4096u);
++		printf("POLARIS BISECT: var=%u table=0x%08x size=%u q0=0x%08x q1=0x%08x q2=0x%08x\\n",
++		    var, tva, *(volatile uint32_t *)(tt + 0x04u),
++		    *(volatile uint32_t *)(tt + 0x1cu),
++		    *(volatile uint32_t *)(tt + 0x4cu),
++		    *(volatile uint32_t *)(tt + 0x7cu));
++		if (s9) {
++			polaris_tcr_ps = 1u;
++			(void)polaris_smmu_space_on(s9, 1u, 1u, 5u);
++			*(volatile uint32_t *)(s9 + POLARIS_S2CR(2)) = 1u;
++			*(volatile uint32_t *)(s9 + POLARIS_SMR(2)) = 0x80000004u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++		}
++		*(volatile uint32_t *)(gpu + 0x14608u) = (var & 16u) ? 0x06030100u : 0x06030000u;
++		*(volatile uint32_t *)(gpu + 0x24c44u) = (var & 32u) ? 0x802800a0u : 0x80a008a0u;
++		*(volatile uint32_t *)(gpu + 0x14400u) = (var & 8u) ? 0x60005003u : 0x60004003u;
++		*(volatile uint32_t *)(gpu + 0x14404u) = 0u;
++		*(volatile uint32_t *)(gpu + 0x13000u) = 1u;
++		*(volatile uint32_t *)(gpu + 0x13004u) = 1u;
++		*(volatile uint32_t *)(gpu + 0x1303cu) = 1u;
++		*(volatile uint32_t *)(gpu + 0x140b4u) = 0x4052u;
++		*(volatile uint32_t *)(gpu + 0x14300u) = 0x09c40400u;
++		*(volatile uint32_t *)(gpu + 0x143a0u) |= 0x00000f11u;
++		*(volatile uint32_t *)(gpu + 0x14730u) = 1u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS BISECT: sfr=0x%08x fence=0x%08x cpmsg=0x%08x\\n",
++		    *(volatile uint32_t *)(gpu + 0x14608u),
++		    *(volatile uint32_t *)(gpu + 0x24c44u),
++		    *(volatile uint32_t *)(gpu + 0x14400u));
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if ((optin >= 44 && optin <= 61) || optin == 62 || optin == 63) {
++	if ((optin >= 44 && optin <= 61) || optin == 62 || optin == 63 || optin == 64) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) =
+-		    (optin == 62 || optin == 63) ? 0x60009000u : 0x60000000u;
++		    (optin == 62 || optin == 63) ? 0x60009000u :
++		    ((optin == 64) ? polaris_qtbl_va : 0x60000000u);
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+ 		printf("POLARIS HFI: QTBL_ADDR=0x60000000 (virtual) INFO=1\n");
+@@ -1561,7 +1641,7 @@ polaris_gpu_gmu_boot(void)
+ 	    (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
+ 	if (v == 0xbabefaceu) {
+ 		/* official gmu_irq_enable: unmask message-queue and fault IRQs */
+-		if (optin >= 60 && optin <= 63) {
++		if (optin >= 60 && optin <= 64) {
+ 			*(volatile uint32_t *)(gpu + 0x14648u) = 0xffffffffu;	/* INFO, write 1 to clear */
+ 			*(volatile uint32_t *)(gpu + 0x14644u) = 0xffffffffu;	/* INTR_CLR */
+ 			printf("POLARIS BOOT: no INTR_MASK write, mask reads 0x%08x\n",
