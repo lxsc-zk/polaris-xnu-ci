@@ -1,0 +1,13 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index f4547b6..5be9faf 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -559,7 +559,7 @@ polaris_scm_call(uint64_t fnid, uint64_t arginfo, uint64_t a0, uint64_t a1,
+ #define POLARIS_CB_TLBSYNC	0x7f0u
+ #define POLARIS_CB_TLBSTATUS	0x7f4u
+ 
+-#define POLARIS_PTE_TABLE	1ull
++#define POLARIS_PTE_TABLE	3ull	/* table descriptor: low two bits, not a block */
+ #define POLARIS_PTE_PAGE	3ull
+ #define POLARIS_PTE_GMU		((2ull << 8) | (1ull << 10) | (1ull << 11))
+ #define POLARIS_PTE_ADDR	0x0000fffffffff000ull
