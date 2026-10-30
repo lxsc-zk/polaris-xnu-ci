@@ -1,0 +1,73 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 7c318d7..9c4fbb5 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -750,6 +750,28 @@ polaris_hfi_xfer(vm_offset_t gpu, uint8_t *tt, uint8_t *b, uint32_t id,
+ 	return 0;
+ }
+ 
++/* a6xx_gmu_set_oob: raise bit `set` of HOST2GMU_INTR_SET and wait for `ack`
++ * in GMU2HOST_INTR_INFO; the ack bit is cleared again afterwards. */
++static int
++polaris_oob(vm_offset_t gpu, uint32_t set, uint32_t ack)
++{
++	uint32_t info = 0u, k;
++
++	*(volatile uint32_t *)(gpu + 0x14650u) = 1u << set;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (k = 0; k < 2000000u; k++) {
++		info = *(volatile uint32_t *)(gpu + 0x14648u);
++		if (info & (1u << ack)) {
++			break;
++		}
++	}
++	*(volatile uint32_t *)(gpu + 0x14644u) = 1u << ack;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("POLARIS GX: oob set %u ack %u -> info=0x%08x %s\n",
++	    set, ack, info, (info & (1u << ack)) ? "ACKED" : "TIMEOUT");
++	return (info & (1u << ack)) ? 0 : -1;
++}
++
+ void
+ polaris_gpu_gmu_boot(void)
+ {
+@@ -2162,6 +2184,39 @@ pt_done:			;
+ 
+ 		for (k = 0; k < 160u; k++) { m[k] = 0u; }
+ 		(void)polaris_hfi_xfer(gpu, tt, b, 5u, m, 1u, &verdict);
++
++		/* a6xx_gmu_gfx_rail_on: lowest perf level, then BOOT_SLUMBER. */
++		printf("POLARIS GX: before gdscr=0x%08x powerstate=0x%08x sptprac=0x%08x\n",
++		    *(volatile uint32_t *)(gpucc + 0x106cu),
++		    *(volatile uint32_t *)(gpu + 0x143b0u),
++		    *(volatile uint32_t *)(gpu + 0x14340u));
++		*(volatile uint32_t *)(gpu + 0x8fe0u) = 0u;
++		*(volatile uint32_t *)(gpu + 0x8fe4u) = 0u;
++		*(volatile uint32_t *)(gpu + 0x8fe8u) = 0u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS GX: slumber_opt=0x%08x gx_idx=0x%08x mx_idx=0x%08x\n",
++		    *(volatile uint32_t *)(gpu + 0x8fe0u),
++		    *(volatile uint32_t *)(gpu + 0x8fe4u),
++		    *(volatile uint32_t *)(gpu + 0x8fe8u));
++		(void)polaris_oob(gpu, 22u, 30u);
++		*(volatile uint32_t *)(gpu + 0x204u) = 0x778000u;
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		for (k = 0; k < 200000u; k++) {
++			if ((*(volatile uint32_t *)(gpu + 0x14340u) & 0x38u) == 0x28u) {
++				break;
++			}
++		}
++		printf("POLARIS GX: sptprac=0x%08x powerstate=0x%08x gdscr=0x%08x\n",
++		    *(volatile uint32_t *)(gpu + 0x14340u),
++		    *(volatile uint32_t *)(gpu + 0x143b0u),
++		    *(volatile uint32_t *)(gpucc + 0x106cu));
++		(void)polaris_oob(gpu, 16u, 24u);
++		*(volatile uint32_t *)(gpu + 0x14644u) = (1u << 24) | (1u << 30);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		printf("POLARIS GX: after gdscr=0x%08x powerstate=0x%08x sptprac=0x%08x\n",
++		    *(volatile uint32_t *)(gpucc + 0x106cu),
++		    *(volatile uint32_t *)(gpu + 0x143b0u),
++		    *(volatile uint32_t *)(gpu + 0x14340u));
+ 	}
+ 	printf("POLARIS BOOT: GX=0x%08x CX=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpucc + 0x100cu),
