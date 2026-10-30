@@ -1,0 +1,89 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index a5034a9..c280393 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -713,7 +713,7 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
+ 	    optin != 42 && optin != 43 && optin != 44 && optin != 45 &&
+ 	    optin != 46 && optin != 47 && optin != 48 && optin != 49 &&
+-	    optin != 50 && optin != 51) {
++	    optin != 50 && optin != 51 && optin != 52) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -1182,7 +1182,7 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 
+ 	/* ---- optin 44: give the GMU a stage-1 context of our own ---- */
+-	if (optin >= 44 && optin <= 51) {
++	if (optin >= 44 && optin <= 52) {
+ 		vm_offset_t s4 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 		uint32_t k;
+ 		uint64_t pa;
+@@ -1203,7 +1203,7 @@ polaris_gpu_gmu_boot(void)
+ 				    (unsigned long long)(0x60000000ull + (uint64_t)k * 0x1000ull),
+ 				    (unsigned long long)pa);
+ 			}
+-			if (optin == 51) {
++			if (optin == 51 || optin == 52) {
+ 				for (k = 0; k < 4u; k++) {
+ 					pa = kvtophys((vm_offset_t)polaris_hfi_log[k]);
+ 					polaris_pt_map(0x60004000ull + (uint64_t)k * 0x1000ull, pa);
+@@ -1227,7 +1227,7 @@ polaris_gpu_gmu_boot(void)
+ 				    *(volatile uint32_t *)(gpu + 0x140b4u),
+ 				    *(volatile uint32_t *)(gpu + 0x14400u));
+ 			}
+-			if (optin >= 49 && optin <= 51) {
++			if (optin >= 49 && optin <= 52) {
+ 				polaris_tcr_ps = 1u;
+ 			}
+ 			polaris_hfi_build_va(0x60000000u);
+@@ -1246,7 +1246,7 @@ polaris_gpu_gmu_boot(void)
+ 				    *(volatile uint32_t *)(polaris_hfi_tbl + 0x78u));
+ 			}
+ 			(void)polaris_smmu_space_on(s4, 1u, 1u, 5u);
+-			if (optin >= 46 && optin <= 51) {
++			if (optin >= 46 && optin <= 52) {
+ 				/* gmu_user may be the one the firmware fetches with */
+ 				*(volatile uint32_t *)(s4 + POLARIS_S2CR(2)) = 1u;
+ 				*(volatile uint32_t *)(s4 + POLARIS_SMR(2)) = 0x80000004u;
+@@ -1266,7 +1266,7 @@ polaris_gpu_gmu_boot(void)
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
+ 	*(volatile uint32_t *)(gpu + 0x14004u) = 2u;	/* CM3_BOOT_CONFIG = TCM_BOOT */
+-	if (optin >= 44 && optin <= 51) {
++	if (optin >= 44 && optin <= 52) {
+ 		*(volatile uint32_t *)(gpu + 0x14614u) = 0x60000000u;
+ 		*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+@@ -1374,7 +1374,29 @@ polaris_gpu_gmu_boot(void)
+ 			    *(volatile uint32_t *)(gpu + 0x14600u), i,
+ 			    *(volatile uint32_t *)(gpu + 0x14648u),
+ 			    *(volatile uint32_t *)(gpu + 0x14604u));
+-			if (optin >= 46 && optin <= 51) {
++			if (optin == 52) {
++				uint32_t k2;
++
++				printf("POLARIS HFI2: before init=0x%08x status=0x%08x ver=0x%08x fence=0x%08x\n",
++				    *(volatile uint32_t *)(gpu + 0x14618u),
++				    *(volatile uint32_t *)(gpu + 0x14600u),
++				    *(volatile uint32_t *)(gpu + 0x14604u),
++				    *(volatile uint32_t *)(gpu + 0x24c4cu));
++				*(volatile uint32_t *)(gpu + 0x14618u) = 1u;
++				__asm__ __volatile__("dsb sy" ::: "memory");
++				printf("POLARIS HFI2: init readback=0x%08x status=0x%08x\n",
++				    *(volatile uint32_t *)(gpu + 0x14618u),
++				    *(volatile uint32_t *)(gpu + 0x14600u));
++				for (k2 = 0; k2 < 2000000u; k2++) {
++					__asm__ __volatile__("nop");
++				}
++				printf("POLARIS HFI2: after wait status=0x%08x ver=0x%08x fence=0x%08x info=0x%08x\n",
++				    *(volatile uint32_t *)(gpu + 0x14600u),
++				    *(volatile uint32_t *)(gpu + 0x14604u),
++				    *(volatile uint32_t *)(gpu + 0x24c4cu),
++				    *(volatile uint32_t *)(gpu + 0x14648u));
++			}
++			if (optin >= 46 && optin <= 52) {
+ 				vm_offset_t s6 = ml_io_map(POLARIS_SMMU_PA, POLARIS_SMMU_LEN);
+ 
+ 				if (s6) {
