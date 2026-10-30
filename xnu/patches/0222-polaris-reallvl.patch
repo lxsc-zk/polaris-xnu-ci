@@ -1,0 +1,42 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index a7fba8d..9738a78 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -2217,6 +2217,9 @@ pt_done:			;
+ 		static const uint32_t gpu_khz[8] = { 0u, 257000u, 342000u, 414000u,
+ 		    520000u, 596000u, 675000u, 710000u };
+ 		static const uint32_t gmu_khz[3] = { 0u, 200000u, 400000u };
++		/* the phone's own gfx.lvl list: 0,16,48,64,128,192,256,320,384,416 mV */
++		static const uint32_t real_lvl[10] = { 0u, 16u, 48u, 64u, 128u,
++		    192u, 256u, 320u, 384u, 416u };
+ 		static const uint32_t gpu_lvl[8] = { 0u, 64u, 128u, 192u, 256u, 320u, 384u, 416u };
+ 		uint32_t verdict = 0xffffffffu, i, k;
+ 
+@@ -2235,7 +2238,15 @@ pt_done:			;
+ 		for (k = 0; k < 160u; k++) { m[k] = 0u; }
+ 		m[1] = 8u; m[2] = 3u;
+ 		for (i = 0; i < 8u; i++) {
+-			m[3u + 2u * i] = (gpu_lvl[i] << 16) | (i << 8) | i;
++			uint32_t idx = 0u, j;
++
++			for (j = 0; j < 10u; j++) {
++				if (real_lvl[j] >= gpu_lvl[i]) {
++					idx = j;
++					break;
++				}
++			}
++			m[3u + 2u * i] = (gpu_lvl[i] << 16) | (idx << 8) | idx;
+ 			m[4u + 2u * i] = gpu_khz[i];
+ 		}
+ 		for (i = 0; i < 3u; i++) { m[35u + 2u * i] = 0u; m[36u + 2u * i] = gmu_khz[i]; }
+@@ -2287,8 +2298,8 @@ pt_done:			;
+ 					else if (m2[j]) { mi = j; }
+ 				}
+ 			}
+-			gi = 1u;
+-			mi = 1u;
++			gi = 3u;	/* 64 mV corner */
++			mi = 3u;
+ 			printf("POLARIS DB: rail idx forced gx=%u mx=%u (level 64)\n", gi, mi);
+ 			*(volatile uint32_t *)(gpu + 0x8fe4u) = gi;
+ 			*(volatile uint32_t *)(gpu + 0x8fe8u) = mi;
