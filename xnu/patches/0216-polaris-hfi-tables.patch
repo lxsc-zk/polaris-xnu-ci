@@ -1,0 +1,109 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index d668d13..4e32196 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -698,6 +698,58 @@ polaris_smmu_space_on(vm_offset_t s, uint32_t ctx, uint32_t match, uint32_t stre
+ 	return 0;
+ }
+ 
++/* One HFI transaction: header, payload into queue 0, doorbell, wait, verdict. */
++static int
++polaris_hfi_xfer(vm_offset_t gpu, uint8_t *tt, uint8_t *b, uint32_t id,
++    uint32_t *msg, uint32_t words, uint32_t *verdict)
++{
++	volatile uint32_t *h0 = (volatile uint32_t *)(tt + 0x18u);
++	volatile uint32_t *h1 = (volatile uint32_t *)(tt + 0x48u);
++	uint32_t q0a = *(volatile uint32_t *)(tt + 0x18u + 0x04u);
++	uint32_t q1a = *(volatile uint32_t *)(tt + 0x48u + 0x04u);
++	uint32_t *q0 = (uint32_t *)(b + (q0a - 0x60000000u));
++	uint32_t *q1 = (uint32_t *)(b + (q1a - 0x60000000u));
++	static uint32_t seqno = 0u;
++	uint32_t seq, idx, k, info = 0u, ri, n;
++
++	seq = ++seqno & 0xfffu;
++	msg[0] = (seq << 20) | ((words & 0xffu) << 8) | (id & 0xffu);
++	idx = h0[0x2cu / 4u] & 1023u;
++	for (k = 0; k < words; k++) {
++		q0[idx] = msg[k];
++		idx = (idx + 1u) & 1023u;
++	}
++	h0[0x2cu / 4u] = idx;
++	polaris_pt_clean((vm_offset_t)b, 13u * 4096u);
++	*(volatile uint32_t *)(gpu + 0x14650u) = 1u;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (k = 0; k < 2000000u; k++) {
++		info = *(volatile uint32_t *)(gpu + 0x14648u);
++		if (info & 1u) {
++			break;
++		}
++	}
++	if (!(info & 1u)) {
++		if (verdict != NULL) {
++			*verdict = 0xffffffffu;
++		}
++		printf("POLARIS HFI6: id=%u seq=%u NO ANSWER info=0x%08x\n", id, seq, info);
++		return -1;
++	}
++	*(volatile uint32_t *)(gpu + 0x14644u) = 1u;
++	polaris_pt_clean((vm_offset_t)b, 13u * 4096u);
++	ri = h1[0x28u / 4u] & 1023u;
++	n = (q1[ri] >> 8) & 0xffu;
++	if (verdict != NULL) {
++		*verdict = (n >= 3u) ? q1[(ri + 2u) & 1023u] : 0xffffffffu;
++	}
++	printf("POLARIS HFI6: id=%u seq=%u words=%u err=0x%08x payload=%08x\n",
++	    id, seq, words, (n >= 3u) ? q1[(ri + 2u) & 1023u] : 0xffffffffu,
++	    (n >= 4u) ? q1[(ri + 3u) & 1023u] : 0u);
++	h1[0x28u / 4u] = (ri + (n ? n : 1u)) & 1023u;
++	return 0;
++}
++
+ void
+ polaris_gpu_gmu_boot(void)
+ {
+@@ -2050,6 +2102,45 @@ pt_done:			;
+ 			    q1[(ri + 3u) & 1023u]);
+ 		}
+ 	}
++	if (optin == 64 && v == 0xbabefaceu) {
++		uint8_t *b = polaris_scratch;
++		uint8_t *tt = b + (polaris_qtbl_va - 0x60000000u);
++		static uint32_t m[160];
++		static const uint32_t gpu_khz[8] = { 0u, 257000u, 342000u, 414000u,
++		    520000u, 596000u, 675000u, 710000u };
++		static const uint32_t gmu_khz[3] = { 0u, 200000u, 400000u };
++		uint32_t verdict = 0xffffffffu, i, k;
++
++		printf("POLARIS HFI6: status=0x%08x table=0x%08x q0=0x%08x\n",
++		    *(volatile uint32_t *)(gpu + 0x14600u), polaris_qtbl_va,
++		    *(volatile uint32_t *)(tt + 0x18u + 0x04u));
++
++		for (k = 0; k < 160u; k++) { m[k] = 0u; }
++		m[1] = 0u; m[2] = 0x60001000u; m[3] = 0x4000u; m[4] = 1u;
++		(void)polaris_hfi_xfer(gpu, tt, b, 0u, m, 5u, &verdict);
++
++		for (k = 0; k < 160u; k++) { m[k] = 0u; }
++		m[1] = (1u << 28) | (1u << 19) | (1u << 17);
++		(void)polaris_hfi_xfer(gpu, tt, b, 1u, m, 2u, &verdict);
++
++		for (k = 0; k < 160u; k++) { m[k] = 0u; }
++		m[1] = 8u; m[2] = 3u;
++		for (i = 0; i < 8u; i++) { m[3u + 2u * i] = 0u; m[4u + 2u * i] = gpu_khz[i]; }
++		for (i = 0; i < 3u; i++) { m[35u + 2u * i] = 0u; m[36u + 2u * i] = gmu_khz[i]; }
++		(void)polaris_hfi_xfer(gpu, tt, b, 4u, m, 43u, &verdict);
++
++		for (k = 0; k < 160u; k++) { m[k] = 0u; }
++		m[1] = 1u; m[2] = 3u; m[3] = 3u; m[4] = 0x05u; m[5] = 0x07u;
++		m[6] = 0x50034u; m[7] = 0x5007cu; m[8] = 0x5004cu;
++		m[12] = 0x40000000u; m[13] = 0u; m[14] = 0x40000000u;
++		m[18] = 0x60000001u; m[19] = 0x20000001u; m[20] = 0x60000001u;
++		m[24] = 0x50000u; m[25] = 0x5005cu; m[26] = 0x5000cu;
++		m[32] = 0x40000000u; m[33] = 0x40000000u; m[34] = 0x40000000u;
++		(void)polaris_hfi_xfer(gpu, tt, b, 3u, m, 160u, &verdict);
++
++		for (k = 0; k < 160u; k++) { m[k] = 0u; }
++		(void)polaris_hfi_xfer(gpu, tt, b, 5u, m, 1u, &verdict);
++	}
+ 	printf("POLARIS BOOT: GX=0x%08x CX=0x%08x\n",
+ 	    *(volatile uint32_t *)(gpucc + 0x100cu),
+ 	    *(volatile uint32_t *)(gpucc + 0x106cu));
