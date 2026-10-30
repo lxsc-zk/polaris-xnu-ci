@@ -1,0 +1,89 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index b2892a6..9cd78bd 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -266,6 +266,7 @@ polaris_hfi_put(uint32_t off, uint32_t v)
+ static uint8_t polaris_hfi_tbl[4096] __attribute__((aligned(4096)));
+ static uint8_t polaris_hfi_q[3][4096] __attribute__((aligned(4096)));
+ static uint8_t polaris_hfi_log[4][4096] __attribute__((aligned(4096)));
++static uint8_t polaris_scratch[256 * 1024] __attribute__((aligned(4096)));
+ 
+ static void
+ polaris_hfi_build_pages(const uint32_t *pa_q)
+@@ -713,7 +714,8 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 38 && optin != 39 && optin != 40 && optin != 41 &&
+ 	    optin != 42 && optin != 43 && optin != 44 && optin != 45 &&
+ 	    optin != 46 && optin != 47 && optin != 48 && optin != 49 &&
+-	    optin != 50 && optin != 51 && optin != 52 && optin != 53) {
++	    optin != 50 && optin != 51 && optin != 52 && optin != 53 &&
++	    optin != 54) {
+ 		return;
+ 	}
+ 	if (SecureDTLookupEntry(NULL, "/chosen/memory-map", &mmap) != kSuccess ||
+@@ -1262,6 +1264,66 @@ polaris_gpu_gmu_boot(void)
+ 		}
+ 	}
+ 
++	/* ---- optin 54: hand the GMU a queue table at a physical address, in a
++	 * block of four pages that are physically contiguous. If the GMU fetches
++	 * without going through the SMMU this is the only layout it can read. ---- */
++	if (optin == 54) {
++		uint32_t pg, base = 0xffffffffu, k;
++		uint64_t pa;
++
++		for (pg = 0; pg + 4u <= 64u; pg++) {
++			uint64_t p0 = kvtophys((vm_offset_t)(polaris_scratch + pg * 4096u));
++
++			if ((p0 & 0xfffu) != 0u) {
++				continue;
++			}
++			if (kvtophys((vm_offset_t)(polaris_scratch + (pg + 1u) * 4096u)) == p0 + 0x1000u &&
++			    kvtophys((vm_offset_t)(polaris_scratch + (pg + 2u) * 4096u)) == p0 + 0x2000u &&
++			    kvtophys((vm_offset_t)(polaris_scratch + (pg + 3u) * 4096u)) == p0 + 0x3000u) {
++				base = pg;
++				printf("POLARIS PHYS: contiguous run at page %u pa=0x%llx\n",
++				    pg, (unsigned long long)p0);
++				break;
++			}
++		}
++		if (base == 0xffffffffu) {
++			printf("POLARIS PHYS: no four contiguous pages in the scratch buffer\n");
++		} else {
++			uint8_t *buf = polaris_scratch + base * 4096u;
++			uint32_t qtbl = (uint32_t)kvtophys((vm_offset_t)buf);
++
++			for (k = 0; k < 16384u; k++) {
++				buf[k] = 0u;
++			}
++			*(volatile uint32_t *)(buf + 0x04u) = 42u;
++			*(volatile uint32_t *)(buf + 0x08u) = 6u;
++			*(volatile uint32_t *)(buf + 0x0cu) = 12u;
++			*(volatile uint32_t *)(buf + 0x10u) = 3u;
++			*(volatile uint32_t *)(buf + 0x14u) = 3u;
++			for (k = 0; k < 3u; k++) {
++				uint32_t b = 0x18u + k * 48u;
++				*(volatile uint32_t *)(buf + b + 0x00u) = qtbl + 168u + k * (4096u + 16u);
++				*(volatile uint32_t *)(buf + b + 0x04u) =
++				    ((k == 0u) ? 0u : (k == 1u) ? 4u : 5u) |
++				    (((k == 2u) ? 40u : 10u) << 8);
++				*(volatile uint32_t *)(buf + b + 0x08u) = 1u;
++				*(volatile uint32_t *)(buf + b + 0x0cu) = 1024u;
++				*(volatile uint32_t *)(buf + b + 0x18u) = 1u;
++				*(volatile uint32_t *)(buf + b + 0x1cu) = 1u;
++				*(volatile uint32_t *)(buf + b + 0x20u) = 1u;
++			}
++			polaris_pt_clean((vm_offset_t)buf, 16384u);
++			pa = kvtophys((vm_offset_t)buf);
++			printf("POLARIS PHYS: qtbl=0x%08x (physical) q0=0x%08x q1=0x%08x q2=0x%08x\n",
++			    qtbl, qtbl + 168u, qtbl + 168u + 4112u, qtbl + 168u + 8224u);
++			*(volatile uint32_t *)(gpu + 0x14614u) = qtbl;
++			*(volatile uint32_t *)(gpu + 0x14610u) = 1u;
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS PHYS: QTBL_ADDR=0x%08x INFO=1\n",
++			    *(volatile uint32_t *)(gpu + 0x14614u));
++		}
++	}
++
+ 	/* 5. boot config + reset release */
+ 	*(volatile uint32_t *)(gpu + 0x14008u) = 0u;	/* CX_GMU_WFI_CONFIG */
+ 	*(volatile uint32_t *)(gpu + 0x14070u) = 0u;	/* CM3_FW_INIT_RESULT */
