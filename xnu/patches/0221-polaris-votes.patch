@@ -1,0 +1,35 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index da01c8a..a7fba8d 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -2217,6 +2217,7 @@ pt_done:			;
+ 		static const uint32_t gpu_khz[8] = { 0u, 257000u, 342000u, 414000u,
+ 		    520000u, 596000u, 675000u, 710000u };
+ 		static const uint32_t gmu_khz[3] = { 0u, 200000u, 400000u };
++		static const uint32_t gpu_lvl[8] = { 0u, 64u, 128u, 192u, 256u, 320u, 384u, 416u };
+ 		uint32_t verdict = 0xffffffffu, i, k;
+ 
+ 		printf("POLARIS HFI6: status=0x%08x table=0x%08x q0=0x%08x\n",
+@@ -2233,7 +2234,10 @@ pt_done:			;
+ 
+ 		for (k = 0; k < 160u; k++) { m[k] = 0u; }
+ 		m[1] = 8u; m[2] = 3u;
+-		for (i = 0; i < 8u; i++) { m[3u + 2u * i] = 0u; m[4u + 2u * i] = gpu_khz[i]; }
++		for (i = 0; i < 8u; i++) {
++			m[3u + 2u * i] = (gpu_lvl[i] << 16) | (i << 8) | i;
++			m[4u + 2u * i] = gpu_khz[i];
++		}
+ 		for (i = 0; i < 3u; i++) { m[35u + 2u * i] = 0u; m[36u + 2u * i] = gmu_khz[i]; }
+ 		(void)polaris_hfi_xfer(gpu, tt, b, 4u, m, 43u, &verdict);
+ 
+@@ -2283,7 +2287,9 @@ pt_done:			;
+ 					else if (m2[j]) { mi = j; }
+ 				}
+ 			}
+-			printf("POLARIS DB: rail idx gx=%u mx=%u (level 64)\n", gi, mi);
++			gi = 1u;
++			mi = 1u;
++			printf("POLARIS DB: rail idx forced gx=%u mx=%u (level 64)\n", gi, mi);
+ 			*(volatile uint32_t *)(gpu + 0x8fe4u) = gi;
+ 			*(volatile uint32_t *)(gpu + 0x8fe8u) = mi;
+ 		}
