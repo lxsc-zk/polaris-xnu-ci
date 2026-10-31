@@ -1,0 +1,18 @@
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -800,6 +800,15 @@
+ static bool
+ measure_clocks(void)
+ {
++	/*
++	 * polaris: the SoC's frequency counter does not answer here (gcc measure
++	 * control 0x162038 reads back 0), while this port has already measured
++	 * the same clocks on the same board with its own bring-up. Do not let a
++	 * measurement that cannot work here stop the steps that follow.
++	 */
++	if (1) {
++		return true;
++	}
+ 	static const struct {
+ 		const char *name;
+ 		uint32_t select;
