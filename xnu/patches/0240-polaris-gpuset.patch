@@ -1,0 +1,41 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index a28f214..fcbf7a9 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1223,9 +1223,15 @@ polaris_g3d_zap(vm_offset_t g3, vm_offset_t mdt, uint32_t mdt_size,
+ 		}
+ 		__asm__ __volatile__("nop");
+ 	}
+-	printf("POLARIS ZAP: CP_SET_SECURE_MODE(0) RPTR=%u WPTR=%u %s; SECVID=0x%08x\n",
++	for (i = 0; i < 200000u; i++) {
++		if (*(volatile uint32_t *)(g3 + 4u * 0xf400u) == 0u) {
++			break;
++		}
++		__asm__ __volatile__("nop");
++	}
++	printf("POLARIS ZAP: CP_SET_SECURE_MODE(0) RPTR=%u WPTR=%u %s; SECVID=0x%08x after %u polls\n",
+ 	    rptr, wptr, (rptr == wptr) ? "CONSUMED" : "NOT consumed",
+-	    *(volatile uint32_t *)(g3 + 4u * 0xf400u));
++	    *(volatile uint32_t *)(g3 + 4u * 0xf400u), i);
+ 	printf("POLARIS ZAP: %s\n",
+ 	    (*(volatile uint32_t *)(g3 + 4u * 0xf400u) == 0u) ?
+ 	    "THE CORE IS OUT OF SECURE MODE" : "still secure");
+@@ -1608,7 +1614,6 @@ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+ 	    *(volatile uint32_t *)(g + 0x14340u));
+ 
+ 	(void)polaris_oob(g, 16u, 24u);
+-	*(volatile uint32_t *)(g + 0x14644u) = (1u << 24) | (1u << 30);
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	{
+ 		static const struct { const char *n; uint32_t w; } rd3[] = {
+@@ -1633,6 +1638,10 @@ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+ 			printf("POLARIS G3D: 3D block map failed\n");
+ 		}
+ 	}
++	*(volatile uint32_t *)(g + 0x14644u) = (1u << 24) | (1u << 30);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("POLARIS M8: GPU_SET and BOOT_SLUMBER released at the end, info=0x%08x\n",
++	    *(volatile uint32_t *)(g + 0x14648u));
+ 	printf("POLARIS M8: after GPU_SET GX=0x%08x powerstate=0x%08x info=0x%08x\n",
+ 	    *(volatile uint32_t *)(cc + 0x100cu), *(volatile uint32_t *)(g + 0x143b0u),
+ 	    *(volatile uint32_t *)(g + 0x14648u));
