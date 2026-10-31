@@ -1,0 +1,18 @@
+diff --git a/bsd/dev/hakios_polaris_glue.c b/bsd/dev/hakios_polaris_glue.c
+index 42ee7d2..848f4be 100644
+--- a/bsd/dev/hakios_polaris_glue.c
++++ b/bsd/dev/hakios_polaris_glue.c
+@@ -27,6 +27,13 @@ loader_log_putc(char c)
+ 	printf("%c", c);
+ }
+ 
++/* MiniIOSurface's traceLine() hands over a whole line (no varargs). */
++void
++loader_log_line(const char *line)
++{
++	printf("%s\n", line != NULL ? line : "");
++}
++
+ void
+ loader_return(void)
+ {
