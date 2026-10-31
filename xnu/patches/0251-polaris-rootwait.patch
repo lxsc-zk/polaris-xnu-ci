@@ -1,0 +1,41 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 47561f1..ca45664 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1512,9 +1512,35 @@ polaris_preboot_doit(void)
+ static void
+ polaris_preboot_thread(void *arg, wait_result_t wr)
+ {
++	vfs_context_t ctx;
++	vnode_t vp = NULLVP;
++	int i, ready = 0;
++
+ 	(void)arg;
+ 	(void)wr;
+-	IOSleep(25000);
++	ctx = vfs_context_create(NULL);
++	if (ctx == NULL) {
++		(void)thread_terminate(current_thread());
++		return;
++	}
++	/* wait until the root file system is actually mounted: /private must resolve */
++	for (i = 0; i < 120; i++) {
++		IOSleep(1000);
++		vp = NULLVP;
++		if (vnode_lookup("/private", 0, &vp, ctx) == 0) {
++			vnode_put(vp);
++			ready = 1;
++			printf("POLARIS PREBOOT: the root is up after %d s\n", i + 1);
++			break;
++		}
++	}
++	vfs_context_rele(ctx);
++	if (!ready) {
++		printf("POLARIS PREBOOT: the root never appeared, giving up\n");
++		(void)thread_terminate(current_thread());
++		return;
++	}
++	IOSleep(2000);
+ 	polaris_preboot_doit();
+ 	(void)thread_terminate(current_thread());
+ }
