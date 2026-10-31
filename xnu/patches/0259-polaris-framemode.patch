@@ -1,0 +1,35 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 63b2f5d..1749351 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -705,6 +705,30 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
+ 			IOLog("SWEET FB: display %s\n", off ? "off" : "on");
+ 		}
+ 		break;
++	case 74: {	/* SupportedFrameInfo: no list, the caller keeps the current mode */
++		if (args->scalarOutputCount >= 1) {
++			out[0] = 0;
++			outCount = 1;
++		}
++		break;
++	}
++	case 79: {	/* GetBlock: block 0x40 is the current mode, its colour and timing ids */
++		if (args->scalarInputCount >= 1 && args->scalarInput[0] == 0x40 &&
++		    args->structureOutput != NULL && args->structureOutputSize >= 12) {
++			uint32_t ids[2] = { 1, 1 };
++
++			memcpy((uint8_t *)args->structureOutput + 4, ids, sizeof(ids));
++			IOLog("SWEET FB: GetBlock 0x40 -> colour 1 timing 1\n");
++		}
++		break;
++	}
++	case 77: {	/* GetCurrentAbsoluteTime */
++		if (args->scalarOutputCount >= 1) {
++			out[0] = mach_absolute_time();
++			outCount = 1;
++		}
++		break;
++	}
+ 	case kSweetFBSwapWait:
+ 	default:
+ 		break;
