@@ -1,0 +1,118 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 62fa6d0..85b6251 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1368,6 +1368,93 @@ polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
+ 	printf("POLARIS PAINT: the picture is on the screen; no CPU readback (it needs a full frame buffer mapping)\n");
+ }
+ 
++/* ---- the iOS preboot fixup: create /private/preboot/<uuid>/ and the roots-installed cookie ---- */
++static int
++polaris_mkdir_at(const char *dirpath, const char *name, vfs_context_t ctx)
++{
++	vnode_t dvp = NULLVP, vp = NULLVP;
++	struct vnode_attr va;
++	int error;
++
++	error = vnode_lookup(dirpath, 0, &dvp, ctx);
++	if (error != 0) {
++		printf("POLARIS PREBOOT: lookup %s -> %d\n", dirpath, error);
++		return error;
++	}
++	VATTR_INIT(&va);
++	VATTR_WANTED(&va, va_mode);
++	VATTR_WANTED(&va, va_uid);
++	VATTR_WANTED(&va, va_gid);
++	va.va_mode = 0755;
++	va.va_uid = 0;
++	va.va_gid = 0;
++	error = VNOP_MKDIR(dvp, name, &va, &vp, ctx);
++	if (vp != NULLVP) {
++		vnode_put(vp);
++	}
++	vnode_put(dvp);
++	printf("POLARIS PREBOOT: mkdir %s/%s -> %d%s\n", dirpath, name, error,
++	    (error == 0) ? "" : ((error == EEXIST) ? " (exists)" : " FAILED"));
++	return error;
++}
++
++static int
++polaris_make_file(const char *path, vfs_context_t ctx)
++{
++	int error, fd = 0;
++
++	error = vn_open(path, UIO_SYSSPACE, O_CREAT | O_RDWR, 0644, &fd, 0, ctx);
++	if (error != 0) {
++		printf("POLARIS PREBOOT: create %s -> %d FAILED\n", path, error);
++		return error;
++	}
++	file_drop(fd);
++	printf("POLARIS PREBOOT: created %s\n", path);
++	return 0;
++}
++
++static void
++polaris_preboot_fixup(void)
++{
++	char uuid[128];
++	char path[512];
++	vfs_context_t ctx;
++	int r1, r2, r3;
++
++	uuid[0] = 0;
++	if (!PE_parse_boot_argn("polarisuuid", uuid, sizeof(uuid)) || uuid[0] == 0) {
++		printf("POLARIS PREBOOT: no polarisuuid= boot argument, nothing to do\n");
++		return;
++	}
++	printf("POLARIS PREBOOT: uuid '%s'\n", uuid);
++	ctx = vfs_context_create(NULL);
++	if (ctx == NULL) {
++		printf("POLARIS PREBOOT: no vfs context\n");
++		return;
++	}
++	/* does /private/preboot exist and what is in it? */
++	{
++		vnode_t vp = NULLVP;
++		int e = vnode_lookup("/private/preboot", 0, &vp, ctx);
++
++		printf("POLARIS PREBOOT: /private/preboot lookup -> %d\n", e);
++		if (!e) {
++			vnode_put(vp);
++		}
++	}
++	r1 = polaris_mkdir_at("/private/preboot", uuid, ctx);
++	snprintf(path, sizeof(path), "/private/preboot/%s", uuid);
++	r2 = polaris_mkdir_at(path, "usr", ctx);
++	snprintf(path, sizeof(path), "/private/preboot/%s/usr", uuid);
++	r3 = polaris_mkdir_at(path, "standalone", ctx);
++	snprintf(path, sizeof(path), "/private/preboot/%s/usr/standalone", uuid);
++	(void)polaris_mkdir_at(path, "firmware", ctx);
++	snprintf(path, sizeof(path), "/private/preboot/%s/.roots-installed", uuid);
++	(void)polaris_make_file(path, ctx);
++	printf("POLARIS PREBOOT: summary dir=%d usr=%d standalone=%d\n", r1, r2, r3);
++	vfs_context_rele(ctx);
++}
++
+ static int
+ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+     vm_offset_t mdt, vm_offset_t b02)
+@@ -1808,7 +1895,7 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 54 && optin != 55 && optin != 56 && optin != 57 &&
+ 	    optin != 58 && optin != 59 && optin != 60 && optin != 61 &&
+ 	    optin != 62 && optin != 63 && optin != 64 && optin != 67 &&
+-	    optin != 70 && optin != 71) {
++	    optin != 70 && optin != 71 && optin != 81) {
+ 		return;
+ 	}
+ 	if (optin == 67) {
+@@ -1846,6 +1933,10 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 	src = ml_io_map((vm_offset_t)blob, (vm_size_t)blob_size);
++	if (optin == 81) {
++		polaris_preboot_fixup();
++		return;
++	}
+ 	if (optin == 70 || optin == 71) {
+ 		uint64_t sq = 0, sqn = 0;
+ 		vm_offset_t sqe2 = 0;
