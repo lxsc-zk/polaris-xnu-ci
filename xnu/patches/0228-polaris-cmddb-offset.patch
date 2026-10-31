@@ -1,0 +1,24 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 502f32c..3f4f228 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -812,7 +812,8 @@ polaris_cmd_levels(vm_offset_t db, const char *name, uint32_t *count)
+ 		    sl->count > 512u) {
+ 			continue;
+ 		}
+-		e = (const struct polaris_cmd_entry *)((vm_offset_t)db + sl->header_offset);
++		e = (const struct polaris_cmd_entry *)((vm_offset_t)db + 0x90u +
++		    sl->header_offset);
+ 		for (i = 0; i < sl->count; i++) {
+ 			uint32_t same = 1u;
+ 
+@@ -830,7 +831,8 @@ polaris_cmd_levels(vm_offset_t db, const char *name, uint32_t *count)
+ 				return NULL;
+ 			}
+ 			*count = e[i].length / 2u;
+-			return (const uint16_t *)((vm_offset_t)db + sl->data_offset + e[i].offset);
++			return (const uint16_t *)((vm_offset_t)db + 0x90u +
++			    sl->data_offset + e[i].offset);
+ 		}
+ 	}
+ 	return NULL;
