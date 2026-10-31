@@ -1,0 +1,41 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index bf6b9fa..92920ca 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -151,6 +151,17 @@ public:
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++/*
++ * A bare IOAcceleratorES. backboardd waits for one before it draws anything;
++ * with a plain IOService published under that class it stops waiting and uses
++ * its software renderer, which is enough to get a picture on the panel.
++ */
++class IOAcceleratorES : public IOService
++{
++	OSDeclareDefaultStructors(IOAcceleratorES);
++};
++OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
++
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
+@@ -227,6 +238,18 @@ AppleCLCD::start(IOService *provider)
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
+ 	registerService();
++	{
++		IOAcceleratorES * accelerator = OSTypeAlloc(IOAcceleratorES);
++
++		if (accelerator != NULL && accelerator->init() && accelerator->attach(this)) {
++			accelerator->registerService();
++			IOLog("SWEET FB: published a stub IOAcceleratorES\n");
++		} else if (accelerator != NULL) {
++			accelerator->release();
++		} else {
++			IOLog("SWEET FB: no memory for the IOAcceleratorES stub\n");
++		}
++	}
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
+ 	IOLog("SWEET FB: %s %ux%u content at %d,%d\n", fScale ? "scaling to" : "cropping at",
