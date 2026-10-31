@@ -1,0 +1,22 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 29d9f17..cfb3037 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1192,7 +1192,16 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 54 && optin != 55 && optin != 56 && optin != 57 &&
+ 	    optin != 58 && optin != 59 && optin != 60 && optin != 61 &&
+ 	    optin != 62 && optin != 63 && optin != 64 && optin != 67 &&
+-	    optin != 70) {
++	    optin != 70 && optin != 90) {
++		return;
++	}
++	if (optin == 90) {
++		/* dipper's own driver: it reads boot-arg adreno=N for how far to go */
++		extern void hakios_adreno_init(void);
++
++		printf("POLARIS GPU: starting the ported dipper driver\n");
++		hakios_adreno_init();
++		printf("POLARIS GPU: ported driver returned\n");
+ 		return;
+ 	}
+ 	if (optin == 67) {
