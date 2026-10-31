@@ -1,0 +1,31 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 0348211..62fa6d0 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1766,7 +1766,7 @@ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+ 			polaris_g3d_cp(g3, sqe, 31072u);
+ 			polaris_g3d_zap(g3, mdt, 6684u, b02, 0x7b0u);
+ 			polaris_g3d_cmd(g3);
+-			{
++			if (optin == 71) {
+ 				uint64_t tbl[2];
+ 
+ 				tbl[0] = kvtophys((vm_offset_t)polaris_g3d_l2);
+@@ -1808,7 +1808,7 @@ polaris_gpu_gmu_boot(void)
+ 	    optin != 54 && optin != 55 && optin != 56 && optin != 57 &&
+ 	    optin != 58 && optin != 59 && optin != 60 && optin != 61 &&
+ 	    optin != 62 && optin != 63 && optin != 64 && optin != 67 &&
+-	    optin != 70) {
++	    optin != 70 && optin != 71) {
+ 		return;
+ 	}
+ 	if (optin == 67) {
+@@ -1846,7 +1846,7 @@ polaris_gpu_gmu_boot(void)
+ 		return;
+ 	}
+ 	src = ml_io_map((vm_offset_t)blob, (vm_size_t)blob_size);
+-	if (optin == 70) {
++	if (optin == 70 || optin == 71) {
+ 		uint64_t sq = 0, sqn = 0;
+ 		vm_offset_t sqe2 = 0;
+ 
