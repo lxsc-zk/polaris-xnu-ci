@@ -1,0 +1,52 @@
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -459,7 +459,7 @@
+  * registers answer only while gcc_gpu_cfg_ahb runs, which Linux turns on for good when it
+  * starts (gcc-sc7280.c, the end of the probe function).
+  */
+-static struct block gpucc = { "gpucc", 0x03d90000, 0x9000 };
++static struct block gpucc = { "gpucc", 0x05090000, 0x9000 };
+ #define GPUCC_PLL0_MODE         0x0000          /* the 3D core's PLL: bit 31 locked, bit 0 output on; +4: times 19.2 MHz */
+ #define GPUCC_PLL1_MODE         0x0100          /* a 500 MHz PLL, an alternative source for the GMU's clock */
+ #define GPUCC_CXO_AON_CBCR      0x1004
+@@ -887,7 +887,7 @@
+ /*
+  * dt: qcom,gmu "kgsl_gmu_reg" at 0x3d6a000, 0x34000 long. Offsets in a6xx_gmu.xml are in words.
+  */
+-static struct block gmu = { "gmu", 0x03d6a000, 0x34000 };
++static struct block gmu = { "gmu", 0x0506a000, 0x30000 };
+ #define GMU_WORD(n)             (4u * (n))
+ #define GMU_DTCM                GMU_WORD(0x1c00)        /* the processor's 16K of data memory (its code: 0x0c00) */
+ #define GMU_DTCM_VERSIONS       GMU_WORD(0x1c00 + 0xff8) /* five words where loaded firmware carries its versions */
+@@ -913,11 +913,11 @@
+  * which is in the CX half: the vendor's driver writes GBIF_HALT before it starts the GMU.
+  * "cx_misc" at 0x3d9e000 is a page of odds and ends in the CX half.
+  */
+-static struct block gbif = { "gbif", 0x03d00000 + 4 * 0x3c00, 0x1000 };
++static struct block gbif = { "gbif", 0x05000000 + 4 * 0x3c00, 0x1000 };
+ #define GBIF_SCACHE_CNTL0       (4 * 0x01)
+ #define GBIF_HALT               (4 * 0x45)
+ #define GBIF_HALT_ACK           (4 * 0x46)
+-static struct block cx_misc = { "cx_misc", 0x03d9e000, 0x1000 };
++static struct block cx_misc = { "cx_misc", 0x0509e000, 0x1000 };
+ #define CX_MISC_SYSTEM_CACHE_CNTL_0 (4 * 1)
+ #define CX_MISC_SYSTEM_CACHE_CNTL_1 (4 * 2)
+ 
+@@ -1033,7 +1033,7 @@
+  * and qcom,gmu, "iommus"): 0 the GPU, 1 its low-priority twin, 2 secure content, 5 the GMU.
+  * The global registers here are the ones the hypervisor imitates; offsets: arm-smmu.h.
+  */
+-static struct block smmu = { "smmu", 0x03da0000, 0x20000 };
++static struct block smmu = { "smmu", 0x05040000, 0x20000 };
+ #define SMMU_SCR0               0x000
+ #define SMMU_IDR0               0x020           /* [7:0] stream match registers */
+ #define SMMU_IDR1               0x024           /* bit 31: 64K pages, [30:28] log2(pages)-1, [7:0] translation contexts */
+@@ -2260,7 +2260,7 @@
+ }
+ 
+ /* dt: kgsl_3d0_reg_memory: the 3D core's registers; a6xx.xml counts in words */
+-static struct block gpu = { "gpu", 0x03d00000, 0x40000 };
++static struct block gpu = { "gpu", 0x05000000, 0x40000 };
+ #define GPU_WORD(n)             (4u * (n))
+ #define RBBM_INT_0_STATUS       GPU_WORD(0x0201)
+ #define RBBM_STATUS             GPU_WORD(0x0210)
