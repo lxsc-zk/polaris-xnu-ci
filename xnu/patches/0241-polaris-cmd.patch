@@ -1,0 +1,57 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index fcbf7a9..ef3c366 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1237,6 +1237,44 @@ polaris_g3d_zap(vm_offset_t g3, vm_offset_t mdt, uint32_t mdt_size,
+ 	    "THE CORE IS OUT OF SECURE MODE" : "still secure");
+ }
+ 
++/* dipper's first real command: CP_MEM_WRITE of two words into the memptrs page. */
++static void
++polaris_g3d_cmd(vm_offset_t g3)
++{
++	static uint32_t wptr = 11u;	/* after CP_ME_INIT (9) and CP_SET_SECURE_MODE (2) */
++	uint32_t *ring = (uint32_t *)(polaris_g3d_mem + 0x8000u);
++	volatile uint32_t *memptrs = (volatile uint32_t *)(polaris_g3d_mem + 0x10000u);
++	uint32_t rptr = 0xffffffffu, i;
++
++	memptrs[2] = 0u;
++	memptrs[3] = 0u;
++	polaris_pt_clean((vm_offset_t)memptrs, 0x1000u);
++	ring[wptr++] = polaris_pkt7(0x3du, 4u);	/* CP_MEM_WRITE */
++	ring[wptr++] = 0x10010008u;		/* IOVA of memptrs[2] */
++	ring[wptr++] = 0u;
++	ring[wptr++] = 0xc0ffee21u;
++	ring[wptr++] = 0x0badf00du;
++	polaris_pt_clean((vm_offset_t)polaris_g3d_mem, 0x12000u);
++	*(volatile uint32_t *)(g3 + 4u * 0x0807u) = wptr;
++	__asm__ volatile ("dsb sy" ::: "memory");
++	for (i = 0; i < 200000u; i++) {
++		rptr = *(volatile uint32_t *)(g3 + 4u * 0x0806u);
++		if (rptr == wptr) {
++			break;
++		}
++		__asm__ __volatile__("nop");
++	}
++	printf("POLARIS CMD: CP_MEM_WRITE RPTR=%u WPTR=%u %s\n", rptr, wptr,
++	    (rptr == wptr) ? "CONSUMED" : "NOT consumed");
++	printf("POLARIS CMD: memptrs[2..3] = 0x%08x 0x%08x -> the CP's write %s\n",
++	    memptrs[2], memptrs[3],
++	    (memptrs[2] == 0xc0ffee21u && memptrs[3] == 0x0badf00du) ?
++	    "ARRIVED in memory -- THE GPU EXECUTED OUR COMMAND" : "did NOT arrive");
++	printf("POLARIS CMD: RBBM_STATUS=0x%08x INT_0=0x%08x\n",
++	    *(volatile uint32_t *)(g3 + 4u * 0x0210u),
++	    *(volatile uint32_t *)(g3 + 4u * 0x0201u));
++}
++
+ static int
+ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+     vm_offset_t mdt, vm_offset_t b02)
+@@ -1634,6 +1672,7 @@ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+ 			polaris_g3d_init(g3, g);
+ 			polaris_g3d_cp(g3, sqe, 31072u);
+ 			polaris_g3d_zap(g3, mdt, 6684u, b02, 0x7b0u);
++			polaris_g3d_cmd(g3);
+ 		} else {
+ 			printf("POLARIS G3D: 3D block map failed\n");
+ 		}
