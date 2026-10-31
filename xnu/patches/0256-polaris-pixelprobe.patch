@@ -1,0 +1,18 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 92920ca..2e55c4d 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -400,6 +400,13 @@ AppleCLCD::present(const uint8_t *rec)
+ 		}
+ 		uintptr_t src = s->kernelAddress();
+ 		uint32_t bpe = s->bytesPerElement ? s->bytesPerElement : 4;
++		if (sweet_fb_swaps_logged <= 16 && src != 0) {
++			const volatile uint32_t *px = (const volatile uint32_t *)src;
++
++			IOLog("SWEET FB: surface %u pixels: top=0x%08x mid=0x%08x ctr=0x%08x\n",
++			    id, px[0], px[(s->height / 2) * (s->bytesPerRow / 4)],
++			    px[(s->height / 2) * (s->bytesPerRow / 4) + s->width / 2]);
++		}
+ 		if (w <= 0 || h <= 0) {
+ 			w = (int32_t)s->width;
+ 			h = (int32_t)s->height;
