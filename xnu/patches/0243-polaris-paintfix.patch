@@ -1,0 +1,38 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index cb4be54..d5e1295 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1367,7 +1367,8 @@ polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
+ 	printf("POLARIS PAINT: the CP read %u dwords in %u submissions (%s)\n", sent, batches,
+ 	    ok ? "all" : "STOPPED");
+ 
+-	fb = ml_io_map((vm_offset_t)POLARIS_FB_PHYS, POLARIS_FB_FILL);
++	/* a small window is enough to sample the bars, and it does not eat kernel VA */
++	fb = ml_io_map((vm_offset_t)POLARIS_FB_PHYS, 0x10000u);
+ 	if (fb) {
+ 		uint32_t i, sx = 0u, sy = 0u, seed = 12345u;
+ 
+@@ -1377,7 +1378,7 @@ polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
+ 			seed = seed * 1664525u + 1013904223u;
+ 			sx = (seed >> 8) % POLARIS_FB_WIDTH;
+ 			seed = seed * 1664525u + 1013904223u;
+-			sy = (seed >> 8) % (POLARIS_FB_FILL / 4u / POLARIS_FB_WIDTH);
++			sy = 4u + (seed >> 8) % 12u;	/* rows 4..15: inside the painted area */
+ 			v = *(volatile uint32_t *)(fb + 4u * (sy * POLARIS_FB_WIDTH + sx));
+ 			if ((v & 0xffffffu) == (polaris_fb_bar(sx) & 0xffffffu) ||
+ 			    v == 0xffffffffu) {
+@@ -1388,9 +1389,11 @@ polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
+ 		}
+ 		printf("POLARIS PAINT: %u of 2000 sampled pixels look like the CP's picture, %u differ\n",
+ 		    same, differ);
+-		printf("POLARIS PAINT: centre pixel (540,540) = 0x%08x, expected bar 0x%08x\n",
+-		    *(volatile uint32_t *)(fb + 4u * (540u * POLARIS_FB_WIDTH + 540u)),
+-		    polaris_fb_bar(540u));
++		printf("POLARIS PAINT: row 8 samples: x=100 0x%08x x=400 0x%08x x=700 0x%08x x=900 0x%08x\n",
++		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 100u)),
++		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 400u)),
++		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 700u)),
++		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 900u)));
+ 	} else {
+ 		printf("POLARIS PAINT: cannot map the frame buffer for the readback\n");
+ 	}
