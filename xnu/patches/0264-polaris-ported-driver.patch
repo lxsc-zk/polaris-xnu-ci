@@ -1,13 +1,11 @@
-diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
-index 29d9f17..cfb3037 100644
 --- a/bsd/dev/polaris_gpu_diag.c
 +++ b/bsd/dev/polaris_gpu_diag.c
-@@ -1192,7 +1192,16 @@ polaris_gpu_gmu_boot(void)
+@@ -2040,7 +2040,16 @@
  	    optin != 54 && optin != 55 && optin != 56 && optin != 57 &&
  	    optin != 58 && optin != 59 && optin != 60 && optin != 61 &&
  	    optin != 62 && optin != 63 && optin != 64 && optin != 67 &&
--	    optin != 70) {
-+	    optin != 70 && optin != 90) {
+-	    optin != 70 && optin != 71 && optin != 82) {
++	    optin != 70 && optin != 71 && optin != 82 && optin != 90) {
 +		return;
 +	}
 +	if (optin == 90) {
