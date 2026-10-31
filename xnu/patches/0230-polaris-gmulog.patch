@@ -1,0 +1,36 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 29d9f17..de5cb43 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -846,7 +846,7 @@ static int
+ polaris_mi8_flow(vm_offset_t fw)
+ {
+ 	vm_offset_t cc, gc, g, pd, sq, rs, s;
+-	uint8_t *hm;
++	uint8_t *hm, *hfimem;
+ 	uint32_t v, i, j, k, gi = 0u, mi = 0u, wrong = 0u;
+ 	uint8_t *hfimem;
+ 	static const struct { uint8_t reg; uint16_t w; uint32_t val; } tbl[] = {
+@@ -1158,6 +1158,22 @@ polaris_mi8_flow(vm_offset_t fw)
+ 			break;
+ 		}
+ 	}
++	{
++		uint32_t ev = *(volatile uint32_t *)(g + 0x14404u) & 0xffffu;
++
++		printf("POLARIS LOG: cp_resp=%u cp_msg=0x%08x info=0x%08x\\n", ev,
++		    *(volatile uint32_t *)(g + 0x14400u),
++		    *(volatile uint32_t *)(g + 0x14648u));
++		hfimem = (uint8_t *)((vm_offset_t)polaris_scratch);
++		for (i = 0; i < 24u; i++) {
++			volatile uint32_t *lg = (volatile uint32_t *)(hfimem + 0x5000u + i * 16u);
++
++			if (lg[0] || lg[1] || lg[2] || lg[3]) {
++				printf("POLARIS LOG: [%02u] %08x %08x %08x %08x\\n", i,
++				    lg[0], lg[1], lg[2], lg[3]);
++			}
++		}
++	}
+ 	printf("POLARIS M8: after rail GX=0x%08x powerstate=0x%08x sptprac=0x%08x\n",
+ 	    *(volatile uint32_t *)(cc + 0x100cu), *(volatile uint32_t *)(g + 0x143b0u),
+ 	    *(volatile uint32_t *)(g + 0x14340u));
