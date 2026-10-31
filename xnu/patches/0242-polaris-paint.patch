@@ -1,0 +1,146 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index ef3c366..cb4be54 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1275,6 +1275,127 @@ polaris_g3d_cmd(vm_offset_t g3)
+ 	    *(volatile uint32_t *)(g3 + 4u * 0x0201u));
+ }
+ 
++/* dipper's step 22: the CP writes a picture into the screen's frame buffer. */
++#define POLARIS_FB_PHYS   0x9d400000ull
++#define POLARIS_FB_IOVA   0x20000000ull
++#define POLARIS_FB_WIDTH  1080u
++#define POLARIS_FB_HEIGHT 2160u
++#define POLARIS_FB_FILL   (8u * 1024u * 1024u)	/* 4 blocks of 2 MB, never past the buffer */
++
++static uint32_t polaris_fb_bar(uint32_t x)
++{
++	static const uint32_t bars[8] = {
++		0xffffffffu, 0xffffff00u, 0xff00ffffu, 0xff00ff00u,
++		0xffff00ffu, 0xffff0000u, 0xff0000ffu, 0xff000000u
++	};
++
++	return bars[x * 8u / POLARIS_FB_WIDTH];
++}
++
++static void
++polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
++{
++	uint32_t *ring = (uint32_t *)(polaris_g3d_mem + 0x8000u);
++	uint64_t l2p = tables_l1_l2_l3[0], l3p = tables_l1_l2_l3[1];
++	const uint32_t total = POLARIS_FB_FILL / 4u, chunk = 1000u;
++	uint32_t wptr = 16u, sent = 0u, batches = 0u, k;
++	uint32_t same = 0u, differ = 0u;
++	vm_offset_t fb;
++	int ok = 1;
++
++	/* map the four 2 MB blocks of the frame buffer at 0x20000000 */
++	polaris_g3d_l1[(POLARIS_FB_IOVA >> 30) & 0x1ffu] =
++	    l2p | POLARIS_PTE_TABLE;
++	for (k = 0; k < 4u; k++) {
++		polaris_g3d_l2[((POLARIS_FB_IOVA >> 21) & 0x1ffu) + k] =
++		    ((POLARIS_FB_PHYS + (uint64_t)k * 0x200000ull) & POLARIS_PTE_ADDR) |
++		    POLARIS_PTE_GMU | POLARIS_PTE_UNPRIV | 1ull;	/* L2 block */
++	}
++	(void)l3p;
++	polaris_pt_clean((vm_offset_t)polaris_g3d_l1, 4096u);
++	polaris_pt_clean((vm_offset_t)polaris_g3d_l2, 4096u);
++	printf("POLARIS PAINT: %ux%u, %u dwords from IOVA 0x%llx (phys 0x%llx)\n",
++	    POLARIS_FB_WIDTH, POLARIS_FB_HEIGHT, total,
++	    (unsigned long long)POLARIS_FB_IOVA, (unsigned long long)POLARIS_FB_PHYS);
++
++	while (sent < total && ok) {
++		uint32_t c;
++
++		for (c = 0; c < 6u && sent < total; c++) {
++			uint32_t n = (total - sent < chunk) ? (total - sent) : chunk;
++			uint64_t addr = POLARIS_FB_IOVA + 4ull * sent;
++			uint32_t i, w = wptr;
++
++			ring[w++ & 8191u] = polaris_pkt7(0x3du, n + 2u);
++			ring[w++ & 8191u] = (uint32_t)addr;
++			ring[w++ & 8191u] = (uint32_t)(addr >> 32);
++			for (i = 0; i < n; i++) {
++				uint32_t pixel = sent + i;
++				uint32_t x = pixel % POLARIS_FB_WIDTH;
++				uint32_t y = pixel / POLARIS_FB_WIDTH;
++
++				if (y < 8u || x < 8u || x >= POLARIS_FB_WIDTH - 8u) {
++					ring[w++ & 8191u] = 0xffffffffu;
++				} else {
++					ring[w++ & 8191u] = polaris_fb_bar(x);
++				}
++			}
++			wptr = w & 8191u;
++			sent += n;
++		}
++		polaris_pt_clean((vm_offset_t)polaris_g3d_mem, 0x12000u);
++		*(volatile uint32_t *)(g3 + 4u * 0x0807u) = wptr;
++		__asm__ volatile ("dsb sy" ::: "memory");
++		{
++			int drained = 0;
++
++			for (k = 0; k < 20000u; k++) {
++				if (*(volatile uint32_t *)(g3 + 4u * 0x0806u) == wptr) {
++					drained = 1;
++					break;
++				}
++				__asm__ __volatile__("nop");
++			}
++			if (!drained) {
++				printf("POLARIS PAINT: the CP stopped: RPTR=%u WPTR=%u after %u dwords\n",
++				    *(volatile uint32_t *)(g3 + 4u * 0x0806u), wptr, sent);
++				ok = 0;
++			}
++		}
++		batches++;
++	}
++	printf("POLARIS PAINT: the CP read %u dwords in %u submissions (%s)\n", sent, batches,
++	    ok ? "all" : "STOPPED");
++
++	fb = ml_io_map((vm_offset_t)POLARIS_FB_PHYS, POLARIS_FB_FILL);
++	if (fb) {
++		uint32_t i, sx = 0u, sy = 0u, seed = 12345u;
++
++		for (i = 0; i < 2000u; i++) {
++			uint32_t v;
++
++			seed = seed * 1664525u + 1013904223u;
++			sx = (seed >> 8) % POLARIS_FB_WIDTH;
++			seed = seed * 1664525u + 1013904223u;
++			sy = (seed >> 8) % (POLARIS_FB_FILL / 4u / POLARIS_FB_WIDTH);
++			v = *(volatile uint32_t *)(fb + 4u * (sy * POLARIS_FB_WIDTH + sx));
++			if ((v & 0xffffffu) == (polaris_fb_bar(sx) & 0xffffffu) ||
++			    v == 0xffffffffu) {
++				same++;
++			} else {
++				differ++;
++			}
++		}
++		printf("POLARIS PAINT: %u of 2000 sampled pixels look like the CP's picture, %u differ\n",
++		    same, differ);
++		printf("POLARIS PAINT: centre pixel (540,540) = 0x%08x, expected bar 0x%08x\n",
++		    *(volatile uint32_t *)(fb + 4u * (540u * POLARIS_FB_WIDTH + 540u)),
++		    polaris_fb_bar(540u));
++	} else {
++		printf("POLARIS PAINT: cannot map the frame buffer for the readback\n");
++	}
++}
++
+ static int
+ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+     vm_offset_t mdt, vm_offset_t b02)
+@@ -1673,6 +1794,13 @@ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+ 			polaris_g3d_cp(g3, sqe, 31072u);
+ 			polaris_g3d_zap(g3, mdt, 6684u, b02, 0x7b0u);
+ 			polaris_g3d_cmd(g3);
++			{
++				uint64_t tbl[2];
++
++				tbl[0] = kvtophys((vm_offset_t)polaris_g3d_l2);
++				tbl[1] = kvtophys((vm_offset_t)polaris_g3d_l3);
++				polaris_g3d_paint(g3, tbl);
++			}
+ 		} else {
+ 			printf("POLARIS G3D: 3D block map failed\n");
+ 		}
