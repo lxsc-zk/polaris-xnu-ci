@@ -1,0 +1,85 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 31b22c2..d11acfa 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1376,34 +1376,54 @@ polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
+ #include <IOKit/IOLib.h>
+ 
+ static void
+-polaris_cnp(struct componentname *cnp, const char *name, int iop, vfs_context_t ctx)
++polaris_cnp(struct componentname *cnp, char *buf, size_t bufsz, const char *name,
++    int iop, vfs_context_t ctx)
+ {
+ 	bzero(cnp, sizeof(*cnp));
++	strlcpy(buf, name, bufsz);
+ 	cnp->cn_nameiop = (uint32_t)iop;
+ 	cnp->cn_flags = 0;
+ 	cnp->cn_context = ctx;
+-	cnp->cn_nameptr = __DECONST(char *, name);
+-	cnp->cn_namelen = (int)strlen(name);
+-	cnp->cn_pnbuf = __DECONST(char *, name);
+-	cnp->cn_pnlen = (int)strlen(name) + 1;
++	cnp->cn_pnbuf = buf;
++	cnp->cn_pnlen = (int)strlen(buf) + 1;
++	cnp->cn_nameptr = buf;
++	cnp->cn_namelen = (int)strlen(buf);
+ }
+ 
+ static int
+ polaris_mkdir_in(const char *dirpath, const char *name, vfs_context_t ctx)
+ {
+-	uint32_t cnf;
++	char nbuf[NAME_MAX + 1];
+ 	vnode_t dvp = NULLVP, vp = NULLVP;
+ 	struct componentname c;
+ 	struct vnode_attr va;
+ 	int error;
+ 
+-	cnf = vfs_context_suser(ctx) ? 0 : 0;
+-	(void)cnf;
++	polaris_cnp(&c, nbuf, sizeof(nbuf), name, CREATE, ctx);
+ 	error = vnode_lookup(dirpath, 0, &dvp, ctx);
+ 	if (error != 0) {
+ 		return error;
+ 	}
+-	polaris_cnp(&c, name, CREATE, ctx);
++	{
++		char probe[512];
++		vnode_t ev = NULLVP;
++
++		snprintf(probe, sizeof(probe), "%s/%s", dirpath, name);
++		if (vnode_lookup(probe, 0, &ev, ctx) == 0) {
++			struct vnode_attr pva;
++			int tr;
++
++			VATTR_INIT(&pva);
++			VATTR_WANTED(&pva, va_type);
++			tr = vnode_getattr(ev, &pva, ctx);
++			if (tr == 0 && pva.va_type != VDIR) {
++				printf("POLARIS PREBOOT: %s is type %d, removing\n",
++				    probe, (int)pva.va_type);
++				(void)VNOP_REMOVE(dvp, ev, &c, 0, ctx);
++			}
++			vnode_put(ev);
++		}
++	}
+ 	VATTR_INIT(&va);
+ 	VATTR_WANTED(&va, va_type);
+ 	VATTR_WANTED(&va, va_mode);
+@@ -1424,6 +1444,7 @@ polaris_mkdir_in(const char *dirpath, const char *name, vfs_context_t ctx)
+ static int
+ polaris_mkfile_in(const char *dirpath, const char *name, vfs_context_t ctx)
+ {
++	char nbuf[NAME_MAX + 1];
+ 	vnode_t dvp = NULLVP, vp = NULLVP;
+ 	struct componentname c;
+ 	struct vnode_attr va;
+@@ -1433,7 +1454,7 @@ polaris_mkfile_in(const char *dirpath, const char *name, vfs_context_t ctx)
+ 	if (error != 0) {
+ 		return error;
+ 	}
+-	polaris_cnp(&c, name, CREATE, ctx);
++	polaris_cnp(&c, nbuf, sizeof(nbuf), name, CREATE, ctx);
+ 	VATTR_INIT(&va);
+ 	VATTR_WANTED(&va, va_type);
+ 	VATTR_WANTED(&va, va_mode);
