@@ -1,0 +1,37 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index fa00b2d..63b2f5d 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -172,6 +172,13 @@ class AppleM2ScalerCSCDriver : public IOService
+ };
+ OSDefineMetaClassAndStructors(AppleM2ScalerCSCDriver, IOService);
+ 
++/* A bare AGXAccelerator: backboardd also matches Apple's own GPU class name. */
++class AGXAccelerator : public IOService
++{
++	OSDeclareDefaultStructors(AGXAccelerator);
++};
++OSDefineMetaClassAndStructors(AGXAccelerator, IOService);
++
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
+@@ -273,6 +280,18 @@ AppleCLCD::start(IOService *provider)
+ 			IOLog("SWEET FB: no memory for the scaler stub\n");
+ 		}
+ 	}
++	{
++		AGXAccelerator * agx = OSTypeAlloc(AGXAccelerator);
++
++		if (agx != NULL && agx->init() && agx->attach(this)) {
++			agx->registerService();
++			IOLog("SWEET FB: published a stub AGXAccelerator\n");
++		} else if (agx != NULL) {
++			agx->release();
++		} else {
++			IOLog("SWEET FB: no memory for the AGX stub\n");
++		}
++	}
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
+ 	IOLog("SWEET FB: %s %ux%u content at %d,%d\n", fScale ? "scaling to" : "cropping at",
