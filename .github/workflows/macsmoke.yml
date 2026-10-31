@@ -1,0 +1,17 @@
+name: macsmoke
+on:
+  workflow_dispatch:
+jobs:
+  which:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: report
+        run: |
+          echo "runner=$RUNNER_OS image=$ImageOS"
+          sw_vers
+          xcodebuild -version || true
