@@ -6,12 +6,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14, macos-15]
+        os: [macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - name: report
+      - name: list xcodes
         run: |
-          echo "runner=$RUNNER_OS image=$ImageOS"
-          sw_vers
-          xcodebuild -version || true
+          echo "--- /Applications ---"
+          ls -1 /Applications | grep -i '^Xcode' || true
+          echo "--- xcode-select ---"
+          xcode-select -p
+          echo "--- iig present? ---"
+          find /Applications -name iig -maxdepth 6 2>/dev/null | head -5
