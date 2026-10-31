@@ -69,8 +69,24 @@ jobs:
         env:
           # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '-s' || '-k -s' }}
-        run: bash build.sh
+        run: |
+          set -o pipefail
+          bash build.sh 2>&1 | tee build.log
 
+      - name: Extract errors
+        if: always()
+        working-directory: dxb
+        run: |
+          grep -n -E "error:|fatal error|Undefined symbols|undefined reference|ld: " build.log > errors.txt || true
+          echo "errors.txt: $(wc -l < errors.txt) lines"
+
+      - name: Upload errors
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xnu-errors
+          path: dxb/errors.txt
+          retention-days: 7
       - name: Package build tree for local compiles
         if: always()
         run: |
