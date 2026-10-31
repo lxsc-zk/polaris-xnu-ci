@@ -1,0 +1,48 @@
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index 2e55c4d..fa00b2d 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -162,6 +162,16 @@ class IOAcceleratorES : public IOService
+ };
+ OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
+ 
++/*
++ * A bare AppleM2ScalerCSCDriver. backboardd matches this class to set up the
++ * display's scaler and colour space; with nothing published it logs "none".
++ */
++class AppleM2ScalerCSCDriver : public IOService
++{
++	OSDeclareDefaultStructors(AppleM2ScalerCSCDriver);
++};
++OSDefineMetaClassAndStructors(AppleM2ScalerCSCDriver, IOService);
++
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
+@@ -237,6 +247,7 @@ AppleCLCD::start(IOService *provider)
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
++	setProperty("backlight-control", true);
+ 	registerService();
+ 	{
+ 		IOAcceleratorES * accelerator = OSTypeAlloc(IOAcceleratorES);
+@@ -250,6 +261,18 @@ AppleCLCD::start(IOService *provider)
+ 			IOLog("SWEET FB: no memory for the IOAcceleratorES stub\n");
+ 		}
+ 	}
++	{
++		AppleM2ScalerCSCDriver * scaler = OSTypeAlloc(AppleM2ScalerCSCDriver);
++
++		if (scaler != NULL && scaler->init() && scaler->attach(this)) {
++			scaler->registerService();
++			IOLog("SWEET FB: published a stub AppleM2ScalerCSCDriver\n");
++		} else if (scaler != NULL) {
++			scaler->release();
++		} else {
++			IOLog("SWEET FB: no memory for the scaler stub\n");
++		}
++	}
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
+ 	IOLog("SWEET FB: %s %ux%u content at %d,%d\n", fScale ? "scaling to" : "cropping at",
