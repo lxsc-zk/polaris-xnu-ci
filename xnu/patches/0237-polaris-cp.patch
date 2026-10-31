@@ -1,0 +1,105 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index 2b610f6..552d171 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1020,8 +1020,73 @@ polaris_g3d_init(vm_offset_t g3, vm_offset_t g)
+ 	    *(volatile uint32_t *)(g3 + 4u * 0x00aeu));
+ }
+ 
++/* dipper's step 20: the CP's microcode, ring and CP_ME_INIT. */
++static uint32_t
++polaris_pm4_parity(uint32_t v)
++{
++	return (0x9669u >> (0xfu & (v ^ (v >> 4) ^ (v >> 8) ^ (v >> 12) ^
++	    (v >> 16) ^ (v >> 20) ^ (v >> 24) ^ (v >> 28)))) & 1u;
++}
++
++static uint32_t
++polaris_pkt7(uint32_t opcode, uint32_t cnt)
++{
++	return 0x70000000u | (cnt & 0x3fffu) | (polaris_pm4_parity(cnt) << 15) |
++	    ((opcode & 0x7fu) << 16) | (polaris_pm4_parity(opcode) << 23);
++}
++
++static void
++polaris_g3d_cp(vm_offset_t g3, vm_offset_t sqe, uint32_t sqe_bytes)
++{
++	static const uint32_t me_init[8] = { 0x2fu, 0x3u, 0x20000000u, 0u, 0u, 0u, 0u, 0u };
++	uint32_t i, *ring = (uint32_t *)(polaris_g3d_mem + 0x8000u);
++	uint32_t rptr = 0xffffffffu, wptr = 0;
++
++	printf("POLARIS CP: sqe blob %u bytes, first words %08x %08x\n", sqe_bytes,
++	    *(volatile uint32_t *)sqe, *(volatile uint32_t *)(sqe + 4u));
++	/* a630_sqe.fw less its first 4 bytes, into the sqe region at 0x10000000 */
++	for (i = 4u; i < 4u + 0x8000u && i < sqe_bytes; i++) {
++		polaris_g3d_mem[i - 4u] = *(volatile uint8_t *)(sqe + i);
++	}
++	for (i = 0; i < 0x8000u / 4u; i++) {
++		ring[i] = 0u;
++	}
++	ring[wptr++] = polaris_pkt7(0x48u, 8u);	/* CP_ME_INIT */
++	for (i = 0; i < 8u; i++) {
++		ring[wptr++] = me_init[i];
++	}
++	polaris_pt_clean((vm_offset_t)polaris_g3d_mem, 0x12000u);
++
++	*(volatile uint32_t *)(g3 + 4u * 0x0808u) = 0u;	/* halt SQE */
++	*(volatile uint32_t *)(g3 + 4u * 0x0807u) = 0u;
++	*(volatile uint32_t *)(g3 + 4u * 0x0830u) = 0x10000000u;	/* SQE base lo */
++	*(volatile uint32_t *)(g3 + 4u * 0x0831u) = 0u;
++	*(volatile uint32_t *)(g3 + 4u * 0x0800u) = 0x10008000u;	/* RB base lo */
++	*(volatile uint32_t *)(g3 + 4u * 0x0801u) = 0u;
++	*(volatile uint32_t *)(g3 + 4u * 0x0802u) = 12u | (2u << 8) | (1u << 27);
++	*(volatile uint32_t *)(g3 + 4u * 0x0808u) = 1u;	/* CP_SQE_CNTL */
++	*(volatile uint32_t *)(g3 + 4u * 0x0807u) = wptr;
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (i = 0; i < 200000u; i++) {
++		rptr = *(volatile uint32_t *)(g3 + 4u * 0x0806u);
++		if (rptr == wptr) {
++			break;
++		}
++		__asm__ __volatile__("nop");
++	}
++	printf("POLARIS CP: ring %u words, RPTR=%u WPTR=%u %s; RBBM_STATUS=0x%08x INT_0=0x%08x\n",
++	    wptr, rptr, wptr, (rptr == wptr) ? "CONSUMED" : "NOT consumed",
++	    *(volatile uint32_t *)(g3 + 4u * 0x0210u),
++	    *(volatile uint32_t *)(g3 + 4u * 0x0201u));
++	printf("POLARIS CP: SQE_CNTL=0x%08x SQE_INSTR_BASE=0x%08x RB_BASE=0x%08x RB_CNTL=0x%08x\n",
++	    *(volatile uint32_t *)(g3 + 4u * 0x0808u),
++	    *(volatile uint32_t *)(g3 + 4u * 0x0830u),
++	    *(volatile uint32_t *)(g3 + 4u * 0x0800u),
++	    *(volatile uint32_t *)(g3 + 4u * 0x0802u));
++}
++
+ static int
+-polaris_mi8_flow(vm_offset_t fw)
++polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe)
+ {
+ 	vm_offset_t cc, gc, g, pd, sq, rs, s;
+ 	uint8_t *hm;
+@@ -1415,6 +1480,7 @@ polaris_mi8_flow(vm_offset_t fw)
+ 				    *(volatile uint32_t *)(g3 + 4u * rd3[d].w));
+ 			}
+ 			polaris_g3d_init(g3, g);
++			polaris_g3d_cp(g3, sqe, 31072u);
+ 		} else {
+ 			printf("POLARIS G3D: 3D block map failed\n");
+ 		}
+@@ -1485,8 +1551,15 @@ polaris_gpu_gmu_boot(void)
+ 	}
+ 	src = ml_io_map((vm_offset_t)blob, (vm_size_t)blob_size);
+ 	if (optin == 70) {
+-		printf("POLARIS M8: port of the dipper flow\n");
+-		(void)polaris_mi8_flow(src);
++		uint64_t sq = 0, sqn = 0;
++		vm_offset_t sqe2 = 0;
++
++		if (gpu_pair(mmap, "GPU-SQE", &sq, &sqn) && sq != 0 && sqn != 0) {
++			sqe2 = ml_io_map((vm_offset_t)sq, (vm_size_t)sqn);
++		}
++		printf("POLARIS M8: port of the dipper flow, sqe at 0x%llx (%llu bytes)\n",
++		    (unsigned long long)sq, (unsigned long long)sqn);
++		(void)polaris_mi8_flow(src, sqe2);
+ 		return;
+ 	}
+ 	printf("POLARIS BOOT: blob=0x%llx size=%llu\n",
