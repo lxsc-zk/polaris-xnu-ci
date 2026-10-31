@@ -1,0 +1,42 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index ca45664..31b22c2 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1405,9 +1405,11 @@ polaris_mkdir_in(const char *dirpath, const char *name, vfs_context_t ctx)
+ 	}
+ 	polaris_cnp(&c, name, CREATE, ctx);
+ 	VATTR_INIT(&va);
++	VATTR_WANTED(&va, va_type);
+ 	VATTR_WANTED(&va, va_mode);
+ 	VATTR_WANTED(&va, va_uid);
+ 	VATTR_WANTED(&va, va_gid);
++	va.va_type = VDIR;
+ 	va.va_mode = 0755;
+ 	va.va_uid = 0;
+ 	va.va_gid = 0;
+@@ -1501,6 +1503,25 @@ polaris_preboot_doit(void)
+ 		snprintf(path, sizeof(path), "/private/preboot/%s/usr/standalone", uuid);
+ 		printf("POLARIS PREBOOT: mkdir firmware -> %d\n",
+ 		    polaris_mkdir_in(path, "firmware", ctx));
++		snprintf(path, sizeof(path), "/private/preboot/%s/usr/standalone/firmware", uuid);
++		{
++			vnode_t fv = NULLVP;
++
++			r = vnode_lookup(path, 0, &fv, ctx);
++			printf("POLARIS PREBOOT: firmware lookup -> %d%s\n", r,
++			    (r == 0) ? "" : "  (NOT a usable directory)");
++			if (fv != NULLVP) {
++				struct vnode_attr fva;
++				int ta;
++
++				VATTR_INIT(&fva);
++				VATTR_WANTED(&fva, va_type);
++				ta = vnode_getattr(fv, &fva, ctx);
++				printf("POLARIS PREBOOT: firmware type rc=%d type=%d (2=DIR)\n",
++				    ta, (ta == 0) ? (int)fva.va_type : -1);
++				vnode_put(fv);
++			}
++		}
+ 		snprintf(path, sizeof(path), "/private/preboot/%s", uuid);
+ 		r = polaris_mkfile_in(path, ".roots-installed", ctx);
+ 		printf("POLARIS PREBOOT: create .roots-installed -> %d\n", r);
