@@ -1,0 +1,10 @@
+name: smoke
+on:
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: say hello
+        run: echo "smoke test ${{ github.run_id }}"
