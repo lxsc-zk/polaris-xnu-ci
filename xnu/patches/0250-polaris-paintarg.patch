@@ -1,0 +1,31 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index c2ddfbd..47561f1 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1534,7 +1534,7 @@ polaris_preboot_start(void)
+ 
+ static int
+ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+-    vm_offset_t mdt, vm_offset_t b02)
++    vm_offset_t mdt, vm_offset_t b02, int paint)
+ {
+ 	vm_offset_t cc, gc, g, pd, sq, rs, s;
+ 	uint8_t *hm;
+@@ -1930,7 +1930,7 @@ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+ 			polaris_g3d_cp(g3, sqe, 31072u);
+ 			polaris_g3d_zap(g3, mdt, 6684u, b02, 0x7b0u);
+ 			polaris_g3d_cmd(g3);
+-			if (optin == 71) {
++			if (paint) {
+ 				uint64_t tbl[2];
+ 
+ 				tbl[0] = kvtophys((vm_offset_t)polaris_g3d_l2);
+@@ -2032,7 +2032,7 @@ polaris_gpu_gmu_boot(void)
+ 		}
+ 		printf("POLARIS M8: port of the dipper flow, sqe at 0x%llx (%llu bytes)\n",
+ 		    (unsigned long long)sq, (unsigned long long)sqn);
+-		(void)polaris_mi8_flow(src, sqe2, md2, b22);
++		(void)polaris_mi8_flow(src, sqe2, md2, b22, optin == 71);
+ 		return;
+ 	}
+ 	printf("POLARIS BOOT: blob=0x%llx size=%llu\n",
