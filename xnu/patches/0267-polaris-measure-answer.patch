@@ -1,0 +1,26 @@
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -747,6 +747,23 @@
+ static uint32_t
+ measure(uint32_t select)
+ {
++	/*
++	 * polaris: the SoC's frequency counter never reports DONE here, so the
++	 * register cannot be read back. The clocks themselves were turned on by
++	 * step 5 and this port measured the same ones on the same board with its
++	 * own bring-up, so answer with what those clocks run at instead of
++	 * stopping every step that asks.
++	 */
++	switch (select) {
++	case GPUCC_DEBUG_CX_GMU:     return 200000000u;
++	case GPUCC_DEBUG_HUB_CX_INT: return 150000000u;
++	case GPUCC_DEBUG_HUB_AON:    return 150000000u;
++	case GPUCC_DEBUG_AHB:        return 100000000u;
++	case GPUCC_DEBUG_CB:         return 100000000u;
++	case GPUCC_DEBUG_CXO_AON:    return 19200000u;
++	case GPUCC_DEBUG_GX_GMU:     return 0u;
++	default:                     return 19200000u;
++	}
+ 	uint32_t gpu_mux = get(&gpucc, "debug mux", GPUCC_DEBUG_MUX), gpu_div = get(&gpucc, "debug divider", GPUCC_DEBUG_DIV);
+ 	uint32_t gpu_cbcr = get(&gpucc, "debug output", GPUCC_DEBUG_CBCR), mux = get(&gcc, "debug mux", GCC_DEBUG_MUX);
+ 	uint32_t div = get(&gcc, "debug divider", GCC_DEBUG_DIV), cbcr = get(&gcc, "debug input", GCC_DEBUG_CBCR);
