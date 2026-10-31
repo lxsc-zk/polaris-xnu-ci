@@ -1,0 +1,57 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index b0e4da9..38c9c12 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1125,6 +1125,41 @@ polaris_mi8_flow(vm_offset_t fw)
+ 			}
+ 			printf("POLARIS M8: cmd_db at 0x%08x size 0x%x: gfx=%u mx=%u\n",
+ 			    pa, sz, gcn, mcn);
++			{
++				const struct polaris_cmd_hdr *hh =
++				    (const struct polaris_cmd_hdr *)db;
++				uint32_t s2;
++
++				printf("POLARIS M8: db version=%u magic=%02x%02x%02x%02x\n",
++				    hh->version, hh->magic[0], hh->magic[1],
++				    hh->magic[2], hh->magic[3]);
++				for (s2 = 0; s2 < 8u; s2++) {
++					if (hh->slave[s2].id == 0u) {
++						continue;
++					}
++					printf("POLARIS M8: slave[%u] id=%u hoff=0x%x doff=0x%x cnt=%u\n",
++					    s2, hh->slave[s2].id, hh->slave[s2].header_offset,
++					    hh->slave[s2].data_offset, hh->slave[s2].count);
++				}
++				for (s2 = 0; s2 < 8u; s2++) {
++					const struct polaris_cmd_slave *sl = &hh->slave[s2];
++					const struct polaris_cmd_entry *e2;
++					uint32_t i2;
++
++					if (sl->id == 0u || sl->count > 64u) {
++						continue;
++					}
++					e2 = (const struct polaris_cmd_entry *)
++					    ((vm_offset_t)db + 0x90u + sl->header_offset);
++					for (i2 = 0; i2 < sl->count && i2 < 64u; i2++) {
++						if (e2[i2].id[0] == 'm' && e2[i2].id[1] == 'x') {
++							printf("POLARIS M8: mx entry id=%.8s len=%u off=0x%x addr=0x%x\n",
++							    e2[i2].id, e2[i2].length,
++							    e2[i2].offset, e2[i2].address);
++						}
++					}
++				}
++			}
+ 		} else {
+ 			printf("POLARIS M8: no cmd_db descriptor at 0x0c3f000c (0x%08x 0x%x)\n", pa, sz);
+ 		}
+@@ -1145,6 +1180,10 @@ polaris_mi8_flow(vm_offset_t fw)
+ 			}
+ 		}
+ 	}
++	if (mi == 0u) {
++		mi = 3u;
++		printf("POLARIS M8: mx index not found, forcing 3 (the 64 mV corner)\n");
++	}
+ 	printf("POLARIS M8: rail idx gx=%u mx=%u\n", gi, mi);
+ 	*(volatile uint32_t *)(g + 0x8fe0u) = 0u;
+ 	*(volatile uint32_t *)(g + 0x8fe4u) = gi;
