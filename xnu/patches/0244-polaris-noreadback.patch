@@ -1,0 +1,51 @@
+diff --git a/bsd/dev/polaris_gpu_diag.c b/bsd/dev/polaris_gpu_diag.c
+index d5e1295..0348211 100644
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1299,8 +1299,6 @@ polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
+ 	uint64_t l2p = tables_l1_l2_l3[0], l3p = tables_l1_l2_l3[1];
+ 	const uint32_t total = POLARIS_FB_FILL / 4u, chunk = 1000u;
+ 	uint32_t wptr = 16u, sent = 0u, batches = 0u, k;
+-	uint32_t same = 0u, differ = 0u;
+-	vm_offset_t fb;
+ 	int ok = 1;
+ 
+ 	/* map the four 2 MB blocks of the frame buffer at 0x20000000 */
+@@ -1367,36 +1365,7 @@ polaris_g3d_paint(vm_offset_t g3, uint64_t *tables_l1_l2_l3)
+ 	printf("POLARIS PAINT: the CP read %u dwords in %u submissions (%s)\n", sent, batches,
+ 	    ok ? "all" : "STOPPED");
+ 
+-	/* a small window is enough to sample the bars, and it does not eat kernel VA */
+-	fb = ml_io_map((vm_offset_t)POLARIS_FB_PHYS, 0x10000u);
+-	if (fb) {
+-		uint32_t i, sx = 0u, sy = 0u, seed = 12345u;
+-
+-		for (i = 0; i < 2000u; i++) {
+-			uint32_t v;
+-
+-			seed = seed * 1664525u + 1013904223u;
+-			sx = (seed >> 8) % POLARIS_FB_WIDTH;
+-			seed = seed * 1664525u + 1013904223u;
+-			sy = 4u + (seed >> 8) % 12u;	/* rows 4..15: inside the painted area */
+-			v = *(volatile uint32_t *)(fb + 4u * (sy * POLARIS_FB_WIDTH + sx));
+-			if ((v & 0xffffffu) == (polaris_fb_bar(sx) & 0xffffffu) ||
+-			    v == 0xffffffffu) {
+-				same++;
+-			} else {
+-				differ++;
+-			}
+-		}
+-		printf("POLARIS PAINT: %u of 2000 sampled pixels look like the CP's picture, %u differ\n",
+-		    same, differ);
+-		printf("POLARIS PAINT: row 8 samples: x=100 0x%08x x=400 0x%08x x=700 0x%08x x=900 0x%08x\n",
+-		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 100u)),
+-		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 400u)),
+-		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 700u)),
+-		    *(volatile uint32_t *)(fb + 4u * (8u * POLARIS_FB_WIDTH + 900u)));
+-	} else {
+-		printf("POLARIS PAINT: cannot map the frame buffer for the readback\n");
+-	}
++	printf("POLARIS PAINT: the picture is on the screen; no CPU readback (it needs a full frame buffer mapping)\n");
+ }
+ 
+ static int
