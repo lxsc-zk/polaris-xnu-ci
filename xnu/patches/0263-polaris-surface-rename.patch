@@ -1,0 +1,347 @@
+diff --git a/iokit/Kernel/MiniIOSurface.cpp b/iokit/Kernel/MiniIOSurface.cpp
+index 5523e85..6922a49 100755
+--- a/iokit/Kernel/MiniIOSurface.cpp
++++ b/iokit/Kernel/MiniIOSurface.cpp
+@@ -35,7 +35,7 @@ static_assert(sizeof(struct minisurf_result) == 0x68, "result layout");
+ static_assert(offsetof(struct minisurf_shared, attachments) == 0x30, "shared layout");
+ static_assert(sizeof(struct minisurf_result) + 20 * sizeof(struct minisurf_plane) == MINISURF_RESULT_MAX, "result size");
+ 
+-/* IOConnectCallMethod selectors of IOSurfaceRootUserClient (iOS 16.5) */
++/* IOConnectCallMethod selectors of MiniSurfaceRootUserClient (iOS 16.5) */
+ enum {
+ 	kSurfaceMethodCreate            = 0,
+ 	kSurfaceMethodLookup            = 4,
+@@ -813,24 +813,24 @@ IOSurfaceSendRight::free(void)
+ 
+ /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+ 
+-class IOCoreSurfaceRoot : public IOService
++class MiniCoreSurfaceRoot : public IOService
+ {
+-	OSDeclareDefaultStructors(IOCoreSurfaceRoot);
++	OSDeclareDefaultStructors(MiniCoreSurfaceRoot);
+ 
+ public:
+ 	virtual bool start(IOService * provider) APPLE_KEXT_OVERRIDE;
+ };
+ 
+-OSDefineMetaClassAndStructors(IOCoreSurfaceRoot, IOService);
++OSDefineMetaClassAndStructors(MiniCoreSurfaceRoot, IOService);
+ 
+ bool
+-IOCoreSurfaceRoot::start(IOService * provider)
++MiniCoreSurfaceRoot::start(IOService * provider)
+ {
+ 	if (!IOService::start(provider)) {
+ 		return false;
+ 	}
+-	setProperty(kIOUserClientClassKey, "IOSurfaceRootUserClient");
+-	setName("IOCoreSurfaceRoot");
++	setProperty(kIOUserClientClassKey, "MiniSurfaceRootUserClient");
++	setName("MiniCoreSurfaceRoot");
+ 	registerService();
+ 	return true;
+ }
+@@ -838,7 +838,7 @@ IOCoreSurfaceRoot::start(IOService * provider)
+ void
+ MiniIOSurfaceStart(IOService * provider)
+ {
+-	IOCoreSurfaceRoot * root;
++	MiniCoreSurfaceRoot * root;
+ 
+ 	gSurfaceLock = IOLockAlloc();
+ 	gSurfaceKeptLock = IOLockAlloc();
+@@ -846,7 +846,7 @@ MiniIOSurfaceStart(IOService * provider)
+ 		gSurfaceTraceOf[0] = 0;
+ 	}
+ 	gSurfaceClearing = thread_call_allocate(surfaceMemoryClear, NULL);
+-	root = OSTypeAlloc(IOCoreSurfaceRoot);
++	root = OSTypeAlloc(MiniCoreSurfaceRoot);
+ 	if (root == NULL || !root->init() || !root->attach(provider)) {
+ 		OSSafeReleaseNULL(root);
+ 		IOLog("MiniIOSurface: cannot create the root service\n");
+@@ -870,9 +870,9 @@ struct minisurf_client_ref {
+ 	bool            detached;               /* the client let go of it and will release shortly */
+ };
+ 
+-class IOSurfaceRootUserClient : public IOUserClient
++class MiniSurfaceRootUserClient : public IOUserClient
+ {
+-	OSDeclareDefaultStructors(IOSurfaceRootUserClient);
++	OSDeclareDefaultStructors(MiniSurfaceRootUserClient);
+ 
+ 	task_t                          fTask;
+ 	struct minisurf_client_ref *    fRefs;
+@@ -915,10 +915,10 @@ public:
+ 	static mach_port_name_t makeSendRight(task_t task, MiniIOSurface * surface);
+ };
+ 
+-OSDefineMetaClassAndStructors(IOSurfaceRootUserClient, IOUserClient);
++OSDefineMetaClassAndStructors(MiniSurfaceRootUserClient, IOUserClient);
+ 
+ bool
+-IOSurfaceRootUserClient::initWithTask(task_t owningTask, void * securityID, UInt32 type, OSDictionary * properties)
++MiniSurfaceRootUserClient::initWithTask(task_t owningTask, void * securityID, UInt32 type, OSDictionary * properties)
+ {
+ 	if (!IOUserClient::initWithTask(owningTask, securityID, type, properties)) {
+ 		return false;
+@@ -928,17 +928,17 @@ IOSurfaceRootUserClient::initWithTask(task_t owningTask, void * securityID, UInt
+ }
+ 
+ bool
+-IOSurfaceRootUserClient::start(IOService * provider)
++MiniSurfaceRootUserClient::start(IOService * provider)
+ {
+ 	if (!IOUserClient::start(provider)) {
+ 		return false;
+ 	}
+-	fTraps[kSurfaceTrapIncrementUseCount].func = (IOTrap) & IOSurfaceRootUserClient::trapIncrementUseCount;
+-	fTraps[kSurfaceTrapDecrementUseCount].func = (IOTrap) & IOSurfaceRootUserClient::trapDecrementUseCount;
+-	fTraps[kSurfaceTrapLock].func = (IOTrap) & IOSurfaceRootUserClient::trapLock;
+-	fTraps[kSurfaceTrapUnlock].func = (IOTrap) & IOSurfaceRootUserClient::trapUnlock;
+-	fTraps[kSurfaceTrapDetach].func = (IOTrap) & IOSurfaceRootUserClient::trapDetach;
+-	fTraps[kSurfaceTrapRelease].func = (IOTrap) & IOSurfaceRootUserClient::trapRelease;
++	fTraps[kSurfaceTrapIncrementUseCount].func = (IOTrap) & MiniSurfaceRootUserClient::trapIncrementUseCount;
++	fTraps[kSurfaceTrapDecrementUseCount].func = (IOTrap) & MiniSurfaceRootUserClient::trapDecrementUseCount;
++	fTraps[kSurfaceTrapLock].func = (IOTrap) & MiniSurfaceRootUserClient::trapLock;
++	fTraps[kSurfaceTrapUnlock].func = (IOTrap) & MiniSurfaceRootUserClient::trapUnlock;
++	fTraps[kSurfaceTrapDetach].func = (IOTrap) & MiniSurfaceRootUserClient::trapDetach;
++	fTraps[kSurfaceTrapRelease].func = (IOTrap) & MiniSurfaceRootUserClient::trapRelease;
+ 	for (unsigned i = 0; i < kSurfaceTrapCount; i++) {
+ 		fTraps[i].object = this;
+ 	}
+@@ -946,7 +946,7 @@ IOSurfaceRootUserClient::start(IOService * provider)
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::clientClose(void)
++MiniSurfaceRootUserClient::clientClose(void)
+ {
+ 	IOLockLock(gSurfaceLock);
+ 	while (fRefCount != 0) {
+@@ -960,7 +960,7 @@ IOSurfaceRootUserClient::clientClose(void)
+ }
+ 
+ void
+-IOSurfaceRootUserClient::free(void)
++MiniSurfaceRootUserClient::free(void)
+ {
+ 	if (fRefs != NULL) {
+ 		if (gSurfaceLock != NULL) {
+@@ -978,7 +978,7 @@ IOSurfaceRootUserClient::free(void)
+ 
+ /* All three with the lock held. */
+ struct minisurf_client_ref *
+-IOSurfaceRootUserClient::findRef(uint32_t sid, bool detached)
++MiniSurfaceRootUserClient::findRef(uint32_t sid, bool detached)
+ {
+ 	for (uint32_t i = 0; i < fRefCount; i++) {
+ 		if (fRefs[i].surface->sid == sid && fRefs[i].detached == detached) {
+@@ -989,7 +989,7 @@ IOSurfaceRootUserClient::findRef(uint32_t sid, bool detached)
+ }
+ 
+ struct minisurf_client_ref *
+-IOSurfaceRootUserClient::addRef(MiniIOSurface * surface)
++MiniSurfaceRootUserClient::addRef(MiniIOSurface * surface)
+ {
+ 	struct minisurf_client_ref * ref;
+ 	IOMemoryMap * map;
+@@ -1025,7 +1025,7 @@ IOSurfaceRootUserClient::addRef(MiniIOSurface * surface)
+ }
+ 
+ void
+-IOSurfaceRootUserClient::dropRef(struct minisurf_client_ref * ref)
++MiniSurfaceRootUserClient::dropRef(struct minisurf_client_ref * ref)
+ {
+ 	MiniIOSurface * s = ref->surface;
+ 
+@@ -1049,7 +1049,7 @@ resultSize(const MiniIOSurface * s)
+ 
+ /* Describe the surface to the client. known: it has the surface already, do not build a second view. */
+ IOReturn
+-IOSurfaceRootUserClient::returnSurface(struct minisurf_client_ref * ref, bool known, IOExternalMethodArguments * args)
++MiniSurfaceRootUserClient::returnSurface(struct minisurf_client_ref * ref, bool known, IOExternalMethodArguments * args)
+ {
+ 	MiniIOSurface * s = ref->surface;
+ 	uint32_t size = resultSize(s);
+@@ -1070,7 +1070,7 @@ IOSurfaceRootUserClient::returnSurface(struct minisurf_client_ref * ref, bool kn
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::methodInit(IOExternalMethodArguments * args)
++MiniSurfaceRootUserClient::methodInit(IOExternalMethodArguments * args)
+ {
+ 	struct {
+ 		uint32_t allocAlignMask;
+@@ -1109,7 +1109,7 @@ unserialize(const uint8_t * data, size_t size)
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::methodCreate(IOExternalMethodArguments * args)
++MiniSurfaceRootUserClient::methodCreate(IOExternalMethodArguments * args)
+ {
+ 	IOReturn ret;
+ 	IOMemoryMap * inMap = NULL;
+@@ -1240,7 +1240,7 @@ IOSurfaceRootUserClient::methodCreate(IOExternalMethodArguments * args)
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::methodLookup(IOExternalMethodArguments * args)
++MiniSurfaceRootUserClient::methodLookup(IOExternalMethodArguments * args)
+ {
+ 	IOReturn ret = kIOReturnNotFound;
+ 	uint32_t sid;
+@@ -1266,7 +1266,7 @@ IOSurfaceRootUserClient::methodLookup(IOExternalMethodArguments * args)
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::methodLookupFromPort(IOExternalMethodArguments * args)
++MiniSurfaceRootUserClient::methodLookupFromPort(IOExternalMethodArguments * args)
+ {
+ 	IOReturn ret;
+ 	OSObject * obj = NULL;
+@@ -1326,7 +1326,7 @@ IOSurfaceRootUserClient::methodLookupFromPort(IOExternalMethodArguments * args)
+ }
+ 
+ mach_port_name_t
+-IOSurfaceRootUserClient::makeSendRight(task_t task, MiniIOSurface * s)
++MiniSurfaceRootUserClient::makeSendRight(task_t task, MiniIOSurface * s)
+ {
+ 	IOSurfaceSendRight * right;
+ 	mach_port_name_t name = 0;
+@@ -1348,11 +1348,11 @@ IOSurfaceRootUserClient::makeSendRight(task_t task, MiniIOSurface * s)
+ mach_port_name_t
+ MiniIOSurfaceMakeSendRight(task_t task, MiniIOSurface * surface)
+ {
+-	return IOSurfaceRootUserClient::makeSendRight(task, surface);
++	return MiniSurfaceRootUserClient::makeSendRight(task, surface);
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::methodCreatePort(IOExternalMethodArguments * args)
++MiniSurfaceRootUserClient::methodCreatePort(IOExternalMethodArguments * args)
+ {
+ 	MiniIOSurface * s;
+ 	mach_port_name_t name;
+@@ -1389,7 +1389,7 @@ returnSeed(IOExternalMethodArguments * args, uint32_t seed)
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::methodSetValue(IOExternalMethodArguments * args, const uint8_t * in, size_t inSize)
++MiniSurfaceRootUserClient::methodSetValue(IOExternalMethodArguments * args, const uint8_t * in, size_t inSize)
+ {
+ 	uint32_t sid, seed = 0;
+ 	OSObject * obj;
+@@ -1434,7 +1434,7 @@ IOSurfaceRootUserClient::methodSetValue(IOExternalMethodArguments * args, const
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::methodRemoveValue(IOExternalMethodArguments * args, const uint8_t * in, size_t inSize)
++MiniSurfaceRootUserClient::methodRemoveValue(IOExternalMethodArguments * args, const uint8_t * in, size_t inSize)
+ {
+ 	uint32_t sid, seed = 0;
+ 	struct minisurf_client_ref * ref;
+@@ -1465,7 +1465,7 @@ IOSurfaceRootUserClient::methodRemoveValue(IOExternalMethodArguments * args, con
+ 
+ /* The reply: 4 bytes unused, the seed, then the serialized value (a dictionary when all were asked for). */
+ IOReturn
+-IOSurfaceRootUserClient::methodCopyValue(IOExternalMethodArguments * args, const uint8_t * in, size_t inSize)
++MiniSurfaceRootUserClient::methodCopyValue(IOExternalMethodArguments * args, const uint8_t * in, size_t inSize)
+ {
+ 	uint32_t sid, header[2] = { 0, 0 };
+ 	struct minisurf_client_ref * ref;
+@@ -1530,7 +1530,7 @@ IOSurfaceRootUserClient::methodCopyValue(IOExternalMethodArguments * args, const
+  * The request: the structure, its size, a mask of the fields that changed, the surface number.
+  */
+ IOReturn
+-IOSurfaceRootUserClient::methodSetBulkAttachments(const uint8_t * in, size_t inSize)
++MiniSurfaceRootUserClient::methodSetBulkAttachments(const uint8_t * in, size_t inSize)
+ {
+ 	static const struct {
+ 		uint8_t from, to;
+@@ -1570,7 +1570,7 @@ IOSurfaceRootUserClient::methodSetBulkAttachments(const uint8_t * in, size_t inS
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments * args,
++MiniSurfaceRootUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments * args,
+     IOExternalMethodDispatch * dispatch, OSObject * target, void * reference)
+ {
+ 	const uint8_t * in = (const uint8_t *) args->structureInput;
+@@ -1689,7 +1689,7 @@ IOSurfaceRootUserClient::externalMethod(uint32_t selector, IOExternalMethodArgum
+ /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+ 
+ IOExternalTrap *
+-IOSurfaceRootUserClient::getTargetAndTrapForIndex(IOService ** targetP, UInt32 index)
++MiniSurfaceRootUserClient::getTargetAndTrapForIndex(IOService ** targetP, UInt32 index)
+ {
+ 	if (index >= kSurfaceTrapCount) {
+ 		return NULL;
+@@ -1699,7 +1699,7 @@ IOSurfaceRootUserClient::getTargetAndTrapForIndex(IOService ** targetP, UInt32 i
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::useCountCommon(uint32_t sid, uint32_t category, int delta)
++MiniSurfaceRootUserClient::useCountCommon(uint32_t sid, uint32_t category, int delta)
+ {
+ 	struct minisurf_client_ref * ref;
+ 	IOReturn ret = kIOReturnNotFound;
+@@ -1724,13 +1724,13 @@ IOSurfaceRootUserClient::useCountCommon(uint32_t sid, uint32_t category, int del
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::trapIncrementUseCount(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
++MiniSurfaceRootUserClient::trapIncrementUseCount(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
+ {
+ 	return useCountCommon((uint32_t) (uintptr_t) p1, (uint32_t) (uintptr_t) p2, 1);
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::trapDecrementUseCount(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
++MiniSurfaceRootUserClient::trapDecrementUseCount(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
+ {
+ 	return useCountCommon((uint32_t) (uintptr_t) p1, (uint32_t) (uintptr_t) p2, -1);
+ }
+@@ -1740,7 +1740,7 @@ IOSurfaceRootUserClient::trapDecrementUseCount(void * p1, void * p2, void * p3,
+  * What matters is the seed, which tells readers that the pixels may have changed.
+  */
+ IOReturn
+-IOSurfaceRootUserClient::lockCommon(uint32_t sid, uint32_t options, user_addr_t seedOut)
++MiniSurfaceRootUserClient::lockCommon(uint32_t sid, uint32_t options, user_addr_t seedOut)
+ {
+ 	struct minisurf_client_ref * ref;
+ 	uint32_t seed = 0;
+@@ -1766,13 +1766,13 @@ IOSurfaceRootUserClient::lockCommon(uint32_t sid, uint32_t options, user_addr_t
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::trapLock(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
++MiniSurfaceRootUserClient::trapLock(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
+ {
+ 	return lockCommon((uint32_t) (uintptr_t) p1, (uint32_t) (uintptr_t) p2, (user_addr_t) (uintptr_t) p3);
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::trapUnlock(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
++MiniSurfaceRootUserClient::trapUnlock(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
+ {
+ 	return lockCommon((uint32_t) (uintptr_t) p1, (uint32_t) (uintptr_t) p2, (user_addr_t) (uintptr_t) p3);
+ }
+@@ -1782,7 +1782,7 @@ IOSurfaceRootUserClient::trapUnlock(void * p1, void * p2, void * p3, void * p4,
+  * "release" after it. A lookup of the same surface in between must make a fresh view.
+  */
+ IOReturn
+-IOSurfaceRootUserClient::trapDetach(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
++MiniSurfaceRootUserClient::trapDetach(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
+ {
+ 	struct minisurf_client_ref * ref;
+ 
+@@ -1796,7 +1796,7 @@ IOSurfaceRootUserClient::trapDetach(void * p1, void * p2, void * p3, void * p4,
+ }
+ 
+ IOReturn
+-IOSurfaceRootUserClient::trapRelease(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
++MiniSurfaceRootUserClient::trapRelease(void * p1, void * p2, void * p3, void * p4, void * p5, void * p6)
+ {
+ 	struct minisurf_client_ref * ref;
+ 	uint32_t sid = (uint32_t) (uintptr_t) p1;
