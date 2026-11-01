@@ -1,0 +1,66 @@
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2080,26 +2080,49 @@
+ 
+ 	gmu_runs = true;
+ 	/*
+-	 * polaris: the GMU's clock comes from GPLL0 and this SoC leaves that PLL
+-	 * off, so the CM3 never executes (GMU memory stays 0xdeadbeef). This port's
+-	 * own bring-up turns it on explicitly before releasing the reset, with
+-	 * gmu_clk_src 3/0x601 rather than the 0x80000011/0x602 used elsewhere.
++	 * polaris: the CM3's clock is "gmu_clk_src", and this SoC leaves the source it was
++	 * pointed at off, so the processor never executes: its memory stays 0xdeadbeef and
++	 * nothing the firmware should write ever appears. What this port's own bring-up
++	 * does -- the sequence that did read 0xbabeface on this very board
++	 * (polaris_mi8_flow, its step 5) -- is: the GPU's AHB clocks on in the global
++	 * controller, gmu_clk_src back on its default source (clear the source select and
++	 * the divider), the GMU's branch on. Repeating it here is harmless when step 5
++	 * already did it, and it is the difference between a pulse that starts the CM3
++	 * and one that does not.
+ 	 */
+ 	{
+ 		uint32_t v;
+ 
+-		v = rd(gcc.base + 0x52004u);
+-		wr(gcc.base + 0x52004u, v | (1u << 15) | (1u << 16));
+-		wr(gpucc.base + 0x1120u, 0x3u);
+-		wr(gpucc.base + 0x1124u, 0x601u);
+-		v = rd(gpucc.base + GPUCC_CX_GMU_CBCR);
+-		v |= (0xfu << 8) | (0xfu << 4);
+-		v &= ~(1u << 31);
+-		v |= 1u;
+-		wr(gpucc.base + GPUCC_CX_GMU_CBCR, v);
++		wr(gcc.base + 0x71004u, rd(gcc.base + 0x71004u) | 1u);
++		wr(gcc.base + 0x7100cu, rd(gcc.base + 0x7100cu) | 1u);
++		wr(gcc.base + 0x71018u, rd(gcc.base + 0x71018u) | 1u);
++		v = rd(gpucc.base + 0x1124u);
++		wr(gpucc.base + 0x1124u, v & ~((7u << 8) | 0x1fu));
++		wr(gpucc.base + 0x1120u, rd(gpucc.base + 0x1120u) | (1u << 0) | (1u << 1));
++		for (int i = 0; i < 1000; i++) {
++			v = rd(gpucc.base + 0x1120u);
++			if (!(v & ((1u << 0) | (1u << 31)))) {
++				break;
++			}
++			sleep_us(1);
++		}
++		v = rd(gpucc.base + 0x1098u);
++		wr(gpucc.base + 0x1098u, (v & ~((0xfu << 8) | (0xfu << 4))) | (0xfu << 8) | (0xfu << 4));
++		wr(gpucc.base + 0x109cu, rd(gpucc.base + 0x109cu) | 1u);
++		wr(gpucc.base + 0x1098u, rd(gpucc.base + 0x1098u) | 1u);
+ 		sleep_ms(2);
+-		printf("adreno: %u: gpll0 and the GMU clock asked for explicitly (polaris)\n", step);
++		printf("adreno: %u: the GMU's clock recipe from this port's own bring-up: rcg=%#x cbcr=%#x (polaris)\n",
++		    step, rd(gpucc.base + 0x1120u), rd(gpucc.base + GPUCC_CX_GMU_CBCR));
+ 	}
++	/*
++	 * The reset has to be a pulse, as a6xx_gmu_start() and this port's bring-up do it:
++	 * hold the CM3, then let it go. Writing only the 0 -- which is what this driver did
++	 * -- leaves the processor where step 13 put it, and because that hold does not read
++	 * back on this board there is no way to tell it never took: no hold, no edge, and
++	 * the CM3 never fetches its first word.
++	 */
++	put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
++	sleep_us(50);
+ 	put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 0);
+ 	for (int i = 0; i < 5000 && (result & GMU_STARTED_MASK) != GMU_STARTED && !(result & GMU_FAILED); i++) {
+ 		sleep_us(100);
