@@ -1,0 +1,46 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 13:44:05.339148123 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 13:44:13.609071182 +0800
+@@ -917,9 +917,9 @@
+ #define GMU_WORD(n)             (4u * (n))
+ #define GMU_DTCM                GMU_WORD(0x1c00)        /* the processor's 16K of data memory (its code: 0x0c00) */
+ #define GMU_DTCM_VERSIONS       GMU_WORD(0x1c00 + 0xff8) /* five words where loaded firmware carries its versions */
+-#define GMU_CM3_SYSRESET        GMU_WORD(0x5000)        /* 1: the processor is held in reset */
+-#define GMU_CM3_BOOT_CONFIG     GMU_WORD(0x5001)
+-#define GMU_CM3_FW_INIT_RESULT  GMU_WORD(0x501c)        /* 0xbabeface once firmware has started */
++#define GMU_CM3_SYSRESET        0x1f800u        /* 1: the processor is held in reset */
++#define GMU_CM3_BOOT_CONFIG     0x1f801u
++#define GMU_CM3_FW_INIT_RESULT  0x1f81cu        /* 0xbabeface once firmware has started */
+ #define GMU_CM3_CFG             GMU_WORD(0x502d)
+ #define GMU_ALWAYS_ON_COUNTER_L GMU_WORD(0x5088)        /* counts the 19.2 MHz crystal */
+ #define GMU_ALWAYS_ON_COUNTER_H GMU_WORD(0x5089)
+@@ -1749,7 +1749,7 @@
+  * message protocol ("HFI").
+  */
+ #define GMU_ITCM_ADDRESS        0x00000000u
+-#define GMU_DTCM_ADDRESS        0x10004000u     /* a6xx_gmu_fw_load: the 650 family's */
++#define GMU_DTCM_ADDRESS        0x00040000u     /* A630: DTCM is at 0x40000, not the a650 family 0x10004000 */
+ #define GMU_TCM_SIZE            0x4000u
+ #define GMU_LOG_ADDRESS         0x60002000u     /* after the two pages the firmware asks for at 0x60000000 */
+ #define GMU_LOG_SIZE            0x4000u
+@@ -1808,10 +1808,10 @@
+ 			uint32_t word;
+ 
+ 			memcpy(&word, gmu_firmware + at, sizeof(word));
+-			put(&gmu, "itcm", GMU_WORD(0x0c00) + (uint32_t)at, word);
++			put(&gmu, "itcm", 0x1b400u + (uint32_t)at, word);
+ 		}
+ 		printf("adreno: %u: %llu bytes written to ITCM at %#x\n", step,
+-		    (unsigned long long)gmu_firmware_size, GMU_WORD(0x0c00));
++		    (unsigned long long)gmu_firmware_size, 0x1b400u);
+ 		/*
+ 		 * The rest the firmware needs is the same either way: the page its
+ 		 * messages come through and the page its log goes to, both in the
+@@ -1865,7 +1865,7 @@
+ 
+ /* ---- step 14: the GMU's firmware ----------------------------------------------------------------------- */
+ 
+-#define GMU_ITCM                GMU_WORD(0x0c00)
++#define GMU_ITCM                0x1b400u
+ 
+ static bool
+ step_gmu_firmware(void)
