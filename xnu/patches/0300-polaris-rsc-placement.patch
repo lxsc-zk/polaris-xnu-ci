@@ -1,0 +1,66 @@
+Subject: [PATCH] polaris: place gmu_pdc_rsc_setup() after its macros, with a prototype
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1968,6 +1968,9 @@
+ 
+ /* ---- step 15: start the GMU ---------------------------------------------------------------------------- */
+ 
++/* the always-on sequencer's side of the GMU's RPMh channel (defined with step 16's macros) */
++static void gmu_pdc_rsc_setup(void);
++
+ #define GMU_ICACHE_CONFIG       GMU_WORD(0x4c00)
+ #define GMU_DCACHE_CONFIG       GMU_WORD(0x4c01)
+ #define GMU_SYS_BUS_CONFIG      GMU_WORD(0x4c0f)
+@@ -2156,6 +2159,25 @@
+ 	return true;
+ }
+ 
++/* ---- step 16: the GMU's way to RPMh, and its message queues ------------------------------------------------ */
++
++/*
++ * The GMU raises and drops the 3D core's supply by itself, through command slots of its own
++ * (step 7) and a sequencer in the always-on part of the SoC, "PDC". On this SoC the always-on
++ * processor programs the PDC; left to us are its two enabling registers and the GMU side's
++ * little program (vendor's a6xx_load_pdc_ucode with pdc_in_aop, a6xx_load_rsc_ucode: after the
++ * firmware has started and before the message queues are).
++ */
++static struct block pdc = { "pdc", 0x0b290000, 0x10000 };       /* dt: qcom,gmu "kgsl_gmu_pdc_cfg" */
++#define PDC_GPU_ENABLE          (4 * 0x1140)
++#define PDC_GPU_SEQ_START_ADDR  (4 * 0x1148)
++#define RSCC_PDC_SEQ_START_ADDR (4 * 0x008)
++#define RSCC_PDC_MATCH_VALUE_LO (4 * 0x009)
++#define RSCC_PDC_MATCH_VALUE_HI (4 * 0x00a)
++#define RSCC_HIDDEN_TCS_CMD0_ADDR (4 * 0x00d)
++#define RSCC_HIDDEN_TCS_CMD0_DATA (4 * 0x00e)
++#define RSCC_OVERRIDE_START_ADDR (4 * 0x100)
++
+ /* ---- the always-on sequencer's side of the GMU's RPMh channel ---------------------------------------------- */
+ 
+ /*
+@@ -2195,25 +2217,6 @@
+ 	printf("adreno: %u: the always-on sequencer and the GMU's RPMh program are in (polaris)\n", step);
+ }
+ 
+-/* ---- step 16: the GMU's way to RPMh, and its message queues ------------------------------------------------ */
+-
+-/*
+- * The GMU raises and drops the 3D core's supply by itself, through command slots of its own
+- * (step 7) and a sequencer in the always-on part of the SoC, "PDC". On this SoC the always-on
+- * processor programs the PDC; left to us are its two enabling registers and the GMU side's
+- * little program (vendor's a6xx_load_pdc_ucode with pdc_in_aop, a6xx_load_rsc_ucode: after the
+- * firmware has started and before the message queues are).
+- */
+-static struct block pdc = { "pdc", 0x0b290000, 0x10000 };       /* dt: qcom,gmu "kgsl_gmu_pdc_cfg" */
+-#define PDC_GPU_ENABLE          (4 * 0x1140)
+-#define PDC_GPU_SEQ_START_ADDR  (4 * 0x1148)
+-#define RSCC_PDC_SEQ_START_ADDR (4 * 0x008)
+-#define RSCC_PDC_MATCH_VALUE_LO (4 * 0x009)
+-#define RSCC_PDC_MATCH_VALUE_HI (4 * 0x00a)
+-#define RSCC_HIDDEN_TCS_CMD0_ADDR (4 * 0x00d)
+-#define RSCC_HIDDEN_TCS_CMD0_DATA (4 * 0x00e)
+-#define RSCC_OVERRIDE_START_ADDR (4 * 0x100)
+-
+ static bool
+ step_gmu_queues(void)
+ {
