@@ -1,0 +1,15 @@
+--- a/bsd/dev/polaris_gpu_diag.c	2026-11-01 10:18:10.763902608 +0800
++++ b/bsd/dev/polaris_gpu_diag.c	2026-11-01 10:18:10.788180645 +0800
+@@ -2049,8 +2049,10 @@
+ 
+ 		printf("POLARIS GPU: starting the ported dipper driver\n");
+ 		hakios_adreno_init();
+-		printf("POLARIS GPU: ported driver returned\n");
+-		return;
++		printf("POLARIS GPU: ported driver returned; the screen stays on this\n");
++		for (;;) {
++			__asm__ __volatile__("wfe");
++		}
+ 	}
+ 	if (optin == 67) {
+ 		vm_offset_t win = ml_io_map(0x84000000ull, 0x4000000ull);
