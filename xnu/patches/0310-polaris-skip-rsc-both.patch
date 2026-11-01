@@ -1,0 +1,17 @@
+Subject: [PATCH] polaris: make adreno_skip_rsc cover step 16's call too
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2484,7 +2484,11 @@
+ 		return false;
+ 	}
+ 	announce("enable the GPU's part of the always-on sequencer and give the GMU's RPMh channel its program");
+-	gmu_pdc_rsc_setup();
++	if (skip_rsc_table) {
++		printf("adreno: %u: adreno_skip_rsc=1: leaving the RSCC/PDC sequence table alone here too\n", step);
++	} else {
++		gmu_pdc_rsc_setup();
++	}
+ 
+ 	announce("ask the GMU to start its message queues");
+ 	if (skip_hfi_start) {
