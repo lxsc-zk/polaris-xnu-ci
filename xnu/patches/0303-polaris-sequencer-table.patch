@@ -1,0 +1,76 @@
+Subject: [PATCH] polaris: use the proven sequencer table and windows for the GMU's RPMh side
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2220,31 +2220,50 @@
+ static void
+ gmu_pdc_rsc_setup(void)
+ {
+-	static const uint32_t program[5] = { 0xeaaae5a0, 0xe1a1ebab, 0xa2e0a581, 0xecac82e2, 0x0020edad };
++	/*
++	 * Verbatim from this port's own bring-up (polaris_mi8_flow, step 11), the sequence
++	 * that read 0xbabeface on this board: its table, its order, and its windows --
++	 * rs = gmu + 0x23000, pd = 0x0b280000, sq = 0x0b480000. The a660-derived values the
++	 * driver had (pdc 0x0b290000, rscc 0x0508db00) are not this board's, which is why
++	 * every read of them returned 0.
++	 */
++	static const struct { uint8_t reg; uint16_t w; uint32_t val; } tbl[] = {
++		{ 0, 0x0004, 1u << 24 }, { 0, 0x000b, 1 }, { 0, 0x000e, 0 }, { 0, 0x000d, 0 },
++		{ 0, 0x0010, 0 }, { 0, 0x000f, 0 }, { 0, 0x0012, 0x80000000u }, { 0, 0x0011, 0 },
++		{ 0, 0x0100, 0 }, { 0, 0x0008, 0x4520 }, { 0, 0x0009, 0x4510 }, { 0, 0x000a, 0x4514 },
++		{ 0, 0x0180, 0xa7a506a0u }, { 0, 0x0181, 0xa1e6a6e7u }, { 0, 0x0182, 0xa2e081e1u },
++		{ 0, 0x0183, 0xe9a982e2u }, { 0, 0x0184, 0x0020e8a8u },
++		{ 2, 0x0000, 0xfebea1e1u }, { 2, 0x0001, 0xa5a4a3a2u }, { 2, 0x0002, 0x8382a6e0u },
++		{ 2, 0x0003, 0xbce3e284u }, { 2, 0x0004, 0x002081fcu },
++		{ 1, 0x1573, 7 }, { 1, 0x1574, 0 }, { 1, 0x1572, 0 },
++		{ 1, 0x1575, 0x10108 }, { 1, 0x1576, 0x30010 }, { 1, 0x1577, 1 },
++		{ 1, 0x1579, 0x10108 }, { 1, 0x157a, 0x30000 }, { 1, 0x157b, 0 },
++		{ 1, 0x157d, 0x10108 }, { 1, 0x157e, 0x30080 }, { 1, 0x157f, 0 },
++		{ 1, 0x15d7, 7 }, { 1, 0x15d8, 0 }, { 1, 0x15d6, 0 },
++		{ 1, 0x15d9, 0x10108 }, { 1, 0x15da, 0x30010 }, { 1, 0x15db, 2 },
++		{ 1, 0x15dd, 0x10108 }, { 1, 0x15de, 0x30000 }, { 1, 0x15df, 3 },
++		{ 1, 0x15e1, 0x10108 }, { 1, 0x15e2, 0x30080 }, { 1, 0x15e3, 3 },
++		{ 1, 0x1148, 0 }, { 1, 0x1140, 0x80000001u },
++	};
++	static vm_offset_t pdc_win, rsc_seq_win;
+ 
+-	if (get(&pdc, "gpu_enable", PDC_GPU_ENABLE) == 0x80000001 &&
+-	    get(&rscc, "seq_mem_0_drv0", RSCC_SEQ_MEM_0_DRV0) == program[0] &&
+-	    get(&rscc, "hidden_tcs_cmd2_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 4) == 0x80000021) {
++	if (pdc_win == 0) {
++		pdc_win = ml_io_map(0x0b280000u, 0x10000u);
++		rsc_seq_win = ml_io_map(0x0b480000u, 0x10000u);
++	}
++	if (pdc_win == 0 || rsc_seq_win == 0) {
++		printf("adreno: %u: the always-on sequencer's windows do not map\n", step);
+ 		return;
+ 	}
+-	put(&pdc, "gpu_seq_start_addr", PDC_GPU_SEQ_START_ADDR, 0);
+-	put(&pdc, "gpu_enable", PDC_GPU_ENABLE, 0x80000001);
+-	put(&rscc, "rsc_status0_drv0", RSCC_RSC_STATUS0_DRV0, 1u << 24);
+-	put(&rscc, "pdc_slave_id_drv0", RSCC_PDC_SLAVE_ID_DRV0, 1);
+-	put(&rscc, "hidden_tcs_cmd0_data", RSCC_HIDDEN_TCS_CMD0_DATA, 0);
+-	put(&rscc, "hidden_tcs_cmd0_addr", RSCC_HIDDEN_TCS_CMD0_ADDR, 0);
+-	put(&rscc, "hidden_tcs_cmd1_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 2, 0);
+-	put(&rscc, "hidden_tcs_cmd1_addr", RSCC_HIDDEN_TCS_CMD0_ADDR + 4 * 2, 0);
+-	put(&rscc, "hidden_tcs_cmd2_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 4, 0x80000021);
+-	put(&rscc, "hidden_tcs_cmd2_addr", RSCC_HIDDEN_TCS_CMD0_ADDR + 4 * 4, 0);
+-	put(&rscc, "override_start_addr", RSCC_OVERRIDE_START_ADDR, 0);
+-	put(&rscc, "pdc_seq_start_addr", RSCC_PDC_SEQ_START_ADDR, 0x4520);
+-	put(&rscc, "pdc_match_value_lo", RSCC_PDC_MATCH_VALUE_LO, 0x4510);
+-	put(&rscc, "pdc_match_value_hi", RSCC_PDC_MATCH_VALUE_HI, 0x4514);
+-	for (unsigned i = 0; i < 5; i++) {
+-		put(&rscc, "seq_mem_drv0", RSCC_SEQ_MEM_0_DRV0 + 4 * i, program[i]);
++	for (unsigned i = 0; i < sizeof(tbl) / sizeof(tbl[0]); i++) {
++		vm_offset_t base = tbl[i].reg == 0 ? gmu.base + 0x23000u :
++		    (tbl[i].reg == 1 ? pdc_win : rsc_seq_win);
++
++		wr(base + 4u * tbl[i].w, tbl[i].val);
+ 	}
+-	printf("adreno: %u: the always-on sequencer and the GMU's RPMh program are in (polaris)\n", step);
++	printf("adreno: %u: the sequencer table this port's bring-up uses is written (%u entries); "
++	    "rscc status0=%#x pdc enable=%#x (polaris)\n", step, (uint32_t)(sizeof(tbl) / sizeof(tbl[0])),
++	    rd(gmu.base + 0x23000u + 0x010u), rd(pdc_win + 4u * 0x1140u));
+ }
+ 
+ static bool
