@@ -1,0 +1,11 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 10:55:48.127348200 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 10:55:48.131348200 +0800
+@@ -1065,7 +1065,7 @@
+  * and qcom,gmu, "iommus"): 0 the GPU, 1 its low-priority twin, 2 secure content, 5 the GMU.
+  * The global registers here are the ones the hypervisor imitates; offsets: arm-smmu.h.
+  */
+-static struct block smmu = { "smmu", 0x05040000, 0x20000 };
++static struct block smmu = { "smmu", 0x05040000, 0x10000 };
+ #define SMMU_SCR0               0x000
+ #define SMMU_IDR0               0x020           /* [7:0] stream match registers */
+ #define SMMU_IDR1               0x024           /* bit 31: 64K pages, [30:28] log2(pages)-1, [7:0] translation contexts */
