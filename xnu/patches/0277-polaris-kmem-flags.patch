@@ -1,0 +1,11 @@
+--- a/bsd/dev/hakios_polaris_glue.c	2026-11-01 11:33:53.143054446 +0800
++++ b/bsd/dev/hakios_polaris_glue.c	2026-11-01 11:33:53.147075222 +0800
+@@ -133,7 +133,7 @@
+ 		if (mapped == 0) {
+ 			return NULL;
+ 		}
+-		if (kmem_alloc(kernel_map, &copy, round_page(bytes), VM_KERN_MEMORY_BSD) != KERN_SUCCESS) {
++		if (kmem_alloc(kernel_map, &copy, round_page(bytes), KMA_DATA | KMA_ZERO, VM_KERN_MEMORY_BSD) != KERN_SUCCESS) {
+ 			return NULL;
+ 		}
+ 		for (i = 0; i < bytes; i++) {
