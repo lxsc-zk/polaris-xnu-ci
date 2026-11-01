@@ -1,0 +1,18 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 15:56:07.075351139 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 15:56:07.095702292 +0800
+@@ -2035,8 +2035,13 @@
+ 	announce("tell the GMU where things are, by its registers: the message table, the log, which GPU this is; its "
+ 	    "caches and its use of RPMh; then let its processor out of reset");
+ 	if (get(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET) != 1) {
+-		printf("adreno: %u: the GMU's processor is not held in reset: not configuring it while it runs\n", step);
+-		return false;
++		/*
++		 * polaris: the CM3's reset state does not read back here (the register
++		 * answers 0 even after a write of 1). The write itself does not fault,
++		 * and this port's own bring-up started the GMU on this board without
++		 * being able to read that bit either, so configure it anyway.
++		 */
++		printf("adreno: %u: cannot read the CM3's reset state back; configuring it anyway\n", step);
+ 	}
+ 	/*
+ 	 * Our own leaving (gpu_block_stop) hands the GMU's RPMh channel to the always-on sequencer, and
