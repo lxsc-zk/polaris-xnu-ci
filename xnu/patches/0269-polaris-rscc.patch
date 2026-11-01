@@ -1,0 +1,27 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 09:55:48.069464408 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 09:55:48.097564248 +0800
+@@ -999,7 +999,7 @@
+  * kernel asks RPMh for the touch screen's supply, but the GMU's own; through them its firmware
+  * raises the 3D core's rail. Offsets in words: a6xx_gmu.xml, domain A6XX_RSCC.
+  */
+-static struct block rscc = { "rscc", 0x03de0000, 0x2000 };
++static struct block rscc = { "rscc", 0x0508db00, 0x2000 };
+ #define RSCC_RSC_STATUS0_DRV0   (4 * 0x004)
+ #define RSCC_PDC_SLAVE_ID_DRV0  (4 * 0x00b)
+ #define RSCC_SEQ_BUSY_DRV0      (4 * 0x101)
+--- a/bsd/dev/polaris_gpu_diag.c	2026-11-01 09:55:48.073478671 +0800
++++ b/bsd/dev/polaris_gpu_diag.c	2026-11-01 09:55:48.097564248 +0800
+@@ -2049,10 +2049,9 @@
+ 
+ 		printf("POLARIS GPU: starting the ported dipper driver\n");
+ 		hakios_adreno_init();
+-		printf("POLARIS GPU: ported driver returned; holding the screen here\n");
+-		for (int spin = 0; ; spin++) {
+-			__asm__ __volatile__("nop");
+-		}
++		printf("POLARIS GPU: ported driver returned; pausing so the log reaches the disk\n");
++		sleep_ms(20000);
++		return;
+ 	}
+ 	if (optin == 67) {
+ 		vm_offset_t win = ml_io_map(0x84000000ull, 0x4000000ull);
