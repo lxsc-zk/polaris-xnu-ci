@@ -1,0 +1,25 @@
+--- a/bsd/dev/hakios_polaris_glue.c	2026-11-01 11:05:00.949207913 +0800
++++ b/bsd/dev/hakios_polaris_glue.c	2026-11-01 11:05:00.973452114 +0800
+@@ -51,11 +51,22 @@
+ static const char *
+ blob_key(const char *name)
+ {
++	/*
++	 * The driver names the firmware family a660 (it is written around that
++	 * one), but this phone has an Adreno 630: answer either name with the
++	 * blobs the payload carries, which are the 630's own.
++	 */
++	if (strcmp(name, "a660_gmu.bin") == 0)	return "GPU-GMU";
+ 	if (strcmp(name, "a630_gmu.bin") == 0)	return "GPU-GMU";
++	if (strcmp(name, "a660_sqe.fw") == 0)	return "GPU-SQE";
+ 	if (strcmp(name, "a630_sqe.fw") == 0)	return "GPU-SQE";
++	if (strcmp(name, "a660_zap.mdt") == 0)	return "GPU-ZAP-MDT";
+ 	if (strcmp(name, "a630_zap.mdt") == 0)	return "GPU-ZAP-MDT";
++	if (strcmp(name, "a660_zap.b00") == 0)	return "GPU-ZAP-B00";
+ 	if (strcmp(name, "a630_zap.b00") == 0)	return "GPU-ZAP-B00";
++	if (strcmp(name, "a660_zap.b01") == 0)	return "GPU-ZAP-B01";
+ 	if (strcmp(name, "a630_zap.b01") == 0)	return "GPU-ZAP-B01";
++	if (strcmp(name, "a660_zap.b02") == 0)	return "GPU-ZAP-B02";
+ 	if (strcmp(name, "a630_zap.b02") == 0)	return "GPU-ZAP-B02";
+ 	return NULL;
+ }
