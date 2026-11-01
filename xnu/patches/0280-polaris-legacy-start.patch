@@ -1,0 +1,31 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 12:07:34.933507949 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 12:07:34.957610665 +0800
+@@ -1852,6 +1852,28 @@
+ 	if (!cx_ready() || gmu_firmware == NULL) {
+ 		return false;
+ 	}
++	/*
++	 * polaris (Adreno 630) is a legacy GMU as Linux calls it: the firmware is
++	 * already in ITCM from step 13 and the processor runs as soon as its reset
++	 * is released. a6xx_gmu_start() does exactly this and then waits for the
++	 * firmware to write 0xbabeface into GMU_CM3_FW_INIT_RESULT.
++	 */
++	if (gmu_firmware_size <= 0x8000) {
++		uint32_t result = 0;
++
++		announce("release the CM3's reset and wait for the firmware to say it started (the legacy way)");
++		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 0);
++		for (int i = 0; i < 500; i++) {
++			result = rd(gmu.base + GMU_CM3_FW_INIT_RESULT);
++			if (result == 0xbabefaceu) {
++				break;
++			}
++			sleep_ms(2);
++		}
++		printf("adreno: %u: cm3_fw_init_result = %#x %s\n", step, result,
++		    result == 0xbabefaceu ? "THE GMU'S FIRMWARE IS RUNNING" : "the CM3 did not say it started");
++		return result == 0xbabefaceu;
++	}
+ 	announce("load the GMU's firmware: its first 16K of code and of data through the GMU's registers (0x3d6d000, "
+ 	    "0x3d71000), the rest into the memory just made");
+ 	put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
