@@ -1,0 +1,50 @@
+Subject: [PATCH] polaris: give the GMU the HFI window this port's bring-up uses
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1764,9 +1764,16 @@
+ #define GMU_ITCM_ADDRESS        0x00000000u
+ #define GMU_DTCM_ADDRESS        0x00040000u     /* A630: DTCM is at 0x40000, not the a650 family 0x10004000 */
+ #define GMU_TCM_SIZE            0x4000u
+-#define GMU_LOG_ADDRESS         0x60002000u     /* after the two pages the firmware asks for at 0x60000000 */
++/* polaris: the addresses this port's own bring-up uses (polaris_mi8_flow): the log at
++ * 0x60005000 -- which is what PWR_COL_CP_MSG = 0x60005003 encodes -- and the message table
++ * at 0x60009000 with one page per queue after it. The a660 layout put the table at
++ * 0x60006000 with the queues packed after it, while still telling the GMU 0x60009000 and
++ * mapping a single page: the firmware then walked into unmapped IOVAs and the CPU hung on
++ * the next GMU register read. */
++#define GMU_LOG_ADDRESS         0x60005000u
+ #define GMU_LOG_SIZE            0x4000u
+-#define GMU_HFI_ADDRESS         0x60006000u
++#define GMU_HFI_ADDRESS         0x60009000u
++#define GMU_HFI_SIZE            0x4000u         /* the table's page and the three queues' */
+ #define GMU_STREAM              5
+ #define GMU_MATCH               0               /* polaris: the GMU uses stream-table entry 0 (verified here);
+ 						 * the 3D core takes 1 */
+@@ -1841,7 +1848,7 @@
+ 		 * format is the only part that a legacy image does not carry.
+ 		 */
+ 		if (!block_new(&gmu_space, &gmu_log, GMU_LOG_ADDRESS, GMU_LOG_SIZE, PTE_GMU) ||
+-		    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, PAGE_SIZE, PTE_GMU)) {
++		    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, GMU_HFI_SIZE, PTE_GMU)) {
+ 			return false;
+ 		}
+ 		announce("give the SMMU's context 1 the GMU's own tables and send its requests (stream 5) through it");
+@@ -1872,7 +1879,7 @@
+ 		}
+ 	}
+ 	if (!block_new(&gmu_space, &gmu_log, GMU_LOG_ADDRESS, GMU_LOG_SIZE, PTE_GMU) ||
+-	    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, PAGE_SIZE, PTE_GMU)) {
++	    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, GMU_HFI_SIZE, PTE_GMU)) {
+ 		return false;
+ 	}
+ 
+@@ -2010,7 +2017,7 @@
+ };
+ #define HFI_QUEUES              3               /* 0: ours to the GMU; 1: its answers; 2: its debugging messages */
+ #define HFI_QUEUE_WORDS         1024
+-#define HFI_QUEUE_AT(n)         (((uint32_t)sizeof(struct hfi_table) + 15) / 16 * 16 + 4096 * (n))
++#define HFI_QUEUE_AT(n)         (4096u * ((n) + 1))     /* page-aligned, as the bring-up does it */
+ 
+ static volatile struct hfi_table *hfi;  /* the uncached view */
+ 
