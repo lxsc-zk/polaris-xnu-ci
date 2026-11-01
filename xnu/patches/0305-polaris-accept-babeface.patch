@@ -1,0 +1,45 @@
+Subject: [PATCH] polaris: the A630's GMU starts with 0xbabeface -- accept it as success
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1996,6 +1996,8 @@
+ #define GMU_CHIP                0x06035000      /* dt qcom,chipid 0x06030500 the way the firmware wants it */
+ #define GMU_STARTED_MASK        0x1ff           /* of fw_init_result, for firmware newer than core 0x20010004 */
+ #define GMU_STARTED             0x100
++/* polaris (A630, legacy GMU): the firmware writes this exact word instead of the bit mask */
++#define GMU_STARTED_LEGACY      0xbabefaceu
+ #define GMU_FAILED              0xe00
+ 
+ /* The table at the head of the HFI page and the three queues after it, as the vendor's driver lays them out. */
+@@ -2172,7 +2174,8 @@
+ 	put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
+ 	sleep_us(50);
+ 	put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 0);
+-	for (int i = 0; i < 5000 && (result & GMU_STARTED_MASK) != GMU_STARTED && !(result & GMU_FAILED); i++) {
++	for (int i = 0; i < 5000 && (result & GMU_STARTED_MASK) != GMU_STARTED &&
++	    result != GMU_STARTED_LEGACY && !(result & GMU_FAILED); i++) {
+ 		sleep_us(100);
+ 		result = rd(gmu.base + GMU_CM3_FW_INIT_RESULT);
+ 	}
+@@ -2180,7 +2183,8 @@
+ 	get(&gmu, "gmu2host_intr_info", GMU_GMU2HOST_INTR_INFO);
+ 	get(&gmu, "ao_host_interrupt_status", GMU_AO_HOST_INTERRUPT_STATUS);
+ 	get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
+-	if (space_faulted(&gmu_space) || (result & GMU_STARTED_MASK) != GMU_STARTED) {
++	if (space_faulted(&gmu_space) ||
++	    ((result & GMU_STARTED_MASK) != GMU_STARTED && result != GMU_STARTED_LEGACY)) {
+ 		/*
+ 		 * One block with everything that decides this, at the end where the screen still
+ 		 * shows it: the reset bit's own readback, the CM3's configuration, the GMU clock,
+@@ -2204,8 +2208,9 @@
+ 		printf("adreno: %u: DIAG cm3_cfg=%#x boot_config=%#x fw_init_result=%#x started_mask=%#x\n",
+ 		    step, rd(gmu.base + GMU_CM3_CFG), rd(gmu.base + GMU_CM3_BOOT_CONFIG),
+ 		    rd(gmu.base + GMU_CM3_FW_INIT_RESULT), result & GMU_STARTED_MASK);
+-		printf("adreno: %u: DIAG cx_gmu_cbcr=%#x pdc_enable=%#x rscc_status0=%#x rscc_seq_busy=%#x\n",
+-		    step, rd(gpucc.base + GPUCC_CX_GMU_CBCR), rd(0x0b280000u + 4u * 0x1140u),
++		/* the PDC window is only mapped inside gmu_pdc_rsc_setup(); do not read it raw */
++		printf("adreno: %u: DIAG cx_gmu_cbcr=%#x rscc_status0=%#x rscc_seq_busy=%#x\n",
++		    step, rd(gpucc.base + GPUCC_CX_GMU_CBCR),
+ 		    rd(gmu.base + 0x23000u + 0x010u), rd(gmu.base + 0x23000u + 0x404u));
+ 		printf("adreno: %u: DIAG ITCM[0]=%#x firmware[0]=%#x %s; gmu itcm write-read %s\n",
+ 		    step, itcm0, want0, itcm0 == want0 ? "match" : "DIFFER",
