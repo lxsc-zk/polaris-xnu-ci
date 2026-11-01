@@ -1,0 +1,35 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 11:48:30.896188708 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 11:48:30.920468216 +0800
+@@ -1780,6 +1780,32 @@
+ 	if (gmu_firmware == NULL) {
+ 		return false;
+ 	}
++	/*
++	 * polaris (Adreno 630) is a "legacy" GMU as Linux calls it: its firmware is
++	 * not the block format below (that is a650 and later) but one raw image that
++	 * goes into the GMU's ITCM whole -- a6xx_gmu_fw_load():
++	 *
++	 *     if (gmu->legacy) {
++	 *             if (fw_image->size > 0x8000) return -EINVAL;
++	 *             gmu_write_bulk(gmu, REG_A6XX_GMU_CM3_ITCM_START,
++	 *                            (u32 *)fw_image->data, fw_image->size);
++	 *             return 0;
++	 *     }
++	 */
++	if (gmu_firmware_size <= 0x8000) {
++		uint64_t at;
++
++		announce("load the GMU's firmware straight into ITCM (the legacy way this GPU takes it)");
++		for (at = 0; at + 4 <= gmu_firmware_size; at += 4) {
++			uint32_t word;
++
++			memcpy(&word, gmu_firmware + at, sizeof(word));
++			put(&gmu, "itcm", GMU_ITCM + (uint32_t)at, word);
++		}
++		printf("adreno: %u: %llu bytes written to ITCM at %#x\n", step,
++		    (unsigned long long)gmu_firmware_size, GMU_ITCM);
++		return true;
++	}
+ 	for (uint64_t at = 0; at + sizeof(struct gmu_firmware_block) <= gmu_firmware_size;) {
+ 		struct gmu_firmware_block block;
+ 
