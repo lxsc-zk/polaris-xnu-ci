@@ -1,0 +1,103 @@
+Subject: [PATCH] polaris: the HFI table in the bring-up's layout, plus its interrupt masks
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2012,6 +2012,10 @@
+ #define GMU_HFI_CTRL_INIT       GMU_WORD(0x5186)
+ #define GMU_GMU2HOST_INTR_CLR   GMU_WORD(0x5191)
+ #define GMU_GMU2HOST_INTR_INFO  GMU_WORD(0x5192)        /* bit 0: a message for us; bit 31: the 3D core is ours */
++/* polaris: the pair the bring-up unmasks before HFI_CTRL_INIT (polaris_gpu_diag.c, its
++ * "official gmu_irq_enable"): without them the firmware's queue interrupts stay masked. */
++#define GMU_GMU2HOST_INTR_MASK  GMU_WORD(0x5193)        /* 0x1464c */
++#define GMU_AO_HOST_INTR_MASK   0x24c18u
+ #define GMU_HOST2GMU_INTR_SET   GMU_WORD(0x5194)        /* bit 0: a message for the GMU; bit 30, 31: see step 17 */
+ #define GMU_RSCC_CONTROL_REQ    GMU_WORD(0x9307)
+ #define GMU_AO_AHB_FENCE_CTRL   GMU_WORD(0x9310)
+@@ -2056,28 +2060,43 @@
+ 		return false;
+ 	}
+ 	/*
+-	 * polaris: fill it the way this port's own bring-up fills it (polaris_mi8_flow, its
+-	 * step 12): 168 words (6 + 3 * 48, not the 17-slot sizeof), the queue types the
+-	 * firmware was built against (0, 4, 5 with priorities 10, 10, 40), and the three
+-	 * words at +0x18/+0x1c/+0x20 set -- the a660 code left them 0.
++	 * polaris: write the table by byte offset, exactly as polaris_gpu_diag.c builds it
++	 * (polaris_hfi_build_va / _build_pages): header 0 / 42 / 6 / 12 / 3 / 3, then each
++	 * queue at 0x18 + i * 48 with start, type, status, words in that order -- the a660
++	 * struct in this file put status first and 168 words in the size field, so the
++	 * firmware read queue addresses where it expected flag words and vice versa.
+ 	 */
+-	static const uint8_t queue_id[HFI_QUEUES] = { 0, 4, 5 };
+-	hfi->words = 168;
+-	hfi->first_queue = 6;
+-	hfi->queue_words = sizeof(struct hfi_queue) / 4;
+-	hfi->queues = hfi->active_queues = HFI_QUEUES;
+-	for (unsigned i = 0; i < HFI_QUEUES; i++) {
+-		hfi->queue[i].start = GMU_HFI_ADDRESS + HFI_QUEUE_AT(i);
+-		hfi->queue[i].type = queue_id[i] | (uint32_t)priority[i] << 8;
+-		hfi->queue[i].words = HFI_QUEUE_WORDS;
+-		hfi->queue[i].status = 1;
+-		hfi->queue[i].unused[1] = 1;
+-		hfi->queue[i].unused[2] = 1;
+-		hfi->queue[i].unused[3] = 1;
+-	}
+-	printf("adreno: %u: HFI table at %#x: words=%u queues=%u q0=%#x q1=%#x q2=%#x sfr=%#x (polaris)\n",
+-	    step, GMU_HFI_ADDRESS, hfi->words, hfi->queues, hfi->queue[0].start,
+-	    hfi->queue[1].start, hfi->queue[2].start, GMU_SFR_ADDRESS);
++	{
++		static const uint8_t queue_id[3] = { 0, 4, 5 };
++		static const uint8_t queue_prio[3] = { 10, 10, 40 };
++		volatile uint32_t *t = (volatile uint32_t *)hfi;
++
++		for (uint32_t i = 0; i < GMU_HFI_SIZE / 4u; i++) {
++			t[i] = 0;
++		}
++		t[0] = 0;                       /* version */
++		t[1] = 42;                      /* the table's size in words */
++		t[2] = 6;                       /* first queue, in words */
++		t[3] = 12;                      /* queue entry size, in words */
++		t[4] = 3;                       /* queues */
++		t[5] = 3;                       /* active queues */
++		for (uint32_t i = 0; i < 3; i++) {
++			uint32_t b = 0x18u + i * 48u;
++
++			t[(b + 0x00u) / 4u] = GMU_HFI_ADDRESS + 168u + i * (4096u + 16u);
++			t[(b + 0x04u) / 4u] = (uint32_t)queue_id[i] | ((uint32_t)queue_prio[i] << 8);
++			t[(b + 0x08u) / 4u] = 1;
++			t[(b + 0x0cu) / 4u] = 1024;
++			t[(b + 0x18u) / 4u] = 1;
++			t[(b + 0x1cu) / 4u] = 1;
++			t[(b + 0x20u) / 4u] = 1;
++		}
++		__asm__ __volatile__("dsb sy" ::: "memory");
++	}
++	printf("adreno: %u: HFI table at %#x: header %u/%u/%u/%u, queues at %#x %#x %#x, sfr %#x (polaris)\n",
++	    step, GMU_HFI_ADDRESS, 42u, 6u, 12u, 3u, GMU_HFI_ADDRESS + 168u,
++	    GMU_HFI_ADDRESS + 168u + (4096u + 16u), GMU_HFI_ADDRESS + 168u + 2u * (4096u + 16u),
++	    GMU_SFR_ADDRESS);
+ 
+ 	announce("tell the GMU where things are, by its registers: the message table, the log, which GPU this is; its "
+ 	    "caches and its use of RPMh; then let its processor out of reset");
+@@ -2496,9 +2515,22 @@
+ 		    step, rd(gmu.base + GMU_HFI_CTRL_STATUS));
+ 		return false;
+ 	}
++	/*
++	 * polaris: the four writes the bring-up does between the firmware's 0xbabeface and
++	 * HFI_CTRL_INIT -- clear the two latches, then unmask the queue and fault interrupts
++	 * on the GMU and AO sides. The driver had the clear only.
++	 */
+ 	printf("adreno: %u: before HFI_CTRL_INIT: hfi_ctrl_status=%#x gmu2host=%#x rsc_status0=%#x\n",
+ 	    step, rd(gmu.base + GMU_HFI_CTRL_STATUS), rd(gmu.base + GMU_GMU2HOST_INTR_INFO),
+ 	    rd(gmu.base + 0x23000u + 0x010u));
++	wr(gmu.base + GMU_GMU2HOST_INTR_INFO, 0xffffffffu);
++	wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 0xffffffffu);
++	wr(gmu.base + GMU_GMU2HOST_INTR_MASK, 0xff7ffffeu);
++	wr(gmu.base + GMU_AO_HOST_INTR_MASK, 0xffffffd6u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("adreno: %u: polaris: latches cleared, masks set: gmu_mask=%#x ao_mask=%#x queued=%#x\n",
++	    step, rd(gmu.base + GMU_GMU2HOST_INTR_MASK), rd(gmu.base + GMU_AO_HOST_INTR_MASK),
++	    rd(gmu.base + GMU_HFI_CTRL_STATUS));
+ 	put(&gmu, "hfi_ctrl_init", GMU_HFI_CTRL_INIT, 1);
+ 	if (!wait_for(&gmu, GMU_HFI_CTRL_STATUS, 1, 1, 500)) {
+ 		get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
