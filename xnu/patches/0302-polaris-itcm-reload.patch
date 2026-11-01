@@ -1,0 +1,39 @@
+Subject: [PATCH] polaris: reload the GMU's ITCM once the clocks are up, and verify it
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2135,6 +2135,34 @@
+ 		    step, rd(gpucc.base + 0x1120u), rd(gpucc.base + GPUCC_CX_GMU_CBCR));
+ 	}
+ 	/*
++	 * polaris: the firmware went into ITCM in step 13, when gmu_clk_src still pointed at
++	 * GPLL0/1.5 -- the clock this SoC leaves off. Writes to a gated block are dropped, so
++	 * write it again now that the clocks are up and read it back: a non-zero count here
++	 * says the CM3 was being handed an empty ITCM, a zero one clears that suspicion.
++	 */
++	if (gmu_firmware != NULL && gmu_firmware_size > 0 && gmu_firmware_size <= 0x8000) {
++		uint32_t differs = 0;
++
++		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
++		sleep_ms(2);
++		for (uint64_t at = 0; at + 4 <= gmu_firmware_size; at += 4) {
++			uint32_t word;
++
++			memcpy(&word, gmu_firmware + at, sizeof(word));
++			wr(gmu.base + GMU_ITCM + (uint32_t)at, word);
++		}
++		for (uint64_t at = 0; at + 4 <= gmu_firmware_size; at += 4) {
++			uint32_t word;
++
++			memcpy(&word, gmu_firmware + at, sizeof(word));
++			if (rd(gmu.base + GMU_ITCM + (uint32_t)at) != word) {
++				differs++;
++			}
++		}
++		printf("adreno: %u: ITCM reloaded with the clocks up: %llu bytes, %u of %llu words differ\n", step,
++		    (unsigned long long)gmu_firmware_size, differs, (unsigned long long)(gmu_firmware_size / 4));
++	}
++	/*
+ 	 * The reset has to be a pulse, as a6xx_gmu_start() and this port's bring-up do it:
+ 	 * hold the CM3, then let it go. Writing only the 0 -- which is what this driver did
+ 	 * -- leaves the processor where step 13 put it, and because that hold does not read
