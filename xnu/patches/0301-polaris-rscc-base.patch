@@ -1,0 +1,15 @@
+Subject: [PATCH] polaris: the RSCC block is at 0x0508d000, not 0x0508db00
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1016,7 +1016,9 @@
+  * kernel asks RPMh for the touch screen's supply, but the GMU's own; through them its firmware
+  * raises the 3D core's rail. Offsets in words: a6xx_gmu.xml, domain A6XX_RSCC.
+  */
+-static struct block rscc = { "rscc", 0x0508db00, 0x2000 };
++/* polaris: gmu_base + 0x23000, as this port's own bring-up addresses it; the 0xb00 this
++ * driver had is inside the same window and reads back 0 everywhere. */
++static struct block rscc = { "rscc", 0x0508d000, 0x2000 };
+ #define RSCC_RSC_STATUS0_DRV0   (4 * 0x004)
+ #define RSCC_PDC_SLAVE_ID_DRV0  (4 * 0x00b)
+ #define RSCC_SEQ_BUSY_DRV0      (4 * 0x101)
