@@ -1,0 +1,24 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 15:39:17.154907444 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 15:39:17.163048171 +0800
+@@ -1824,10 +1824,10 @@
+ 			uint32_t word;
+ 
+ 			memcpy(&word, gmu_firmware + at, sizeof(word));
+-			put(&gmu, "itcm", 0x1b400u + (uint32_t)at, word);
++			put(&gmu, "itcm", 0x3000u + (uint32_t)at, word);
+ 		}
+ 		printf("adreno: %u: %llu bytes written to ITCM at %#x\n", step,
+-		    (unsigned long long)gmu_firmware_size, 0x1b400u);
++		    (unsigned long long)gmu_firmware_size, 0x3000u);
+ 		/*
+ 		 * The rest the firmware needs is the same either way: the page its
+ 		 * messages come through and the page its log goes to, both in the
+@@ -1881,7 +1881,7 @@
+ 
+ /* ---- step 14: the GMU's firmware ----------------------------------------------------------------------- */
+ 
+-#define GMU_ITCM                0x1b400u
++#define GMU_ITCM                0x3000u       /* ITCM aperture: the word 0x0c00 the driver had; 0x1b400 was a wrong guess */
+ 
+ static bool
+ step_gmu_firmware(void)
