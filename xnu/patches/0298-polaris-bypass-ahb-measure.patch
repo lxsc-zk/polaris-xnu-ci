@@ -1,0 +1,41 @@
+Subject: [PATCH] polaris: cx_ready() skips the AHB measurement outright
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -895,22 +895,26 @@
+ 		    cx_is_on() ? "on" : "off", gmu_clock);
+ 		return false;
+ 	}
+-	ahb_hz = measure_quietly(GPUCC_DEBUG_AHB);
+ 	/*
+-	 * polaris: this SoC's frequency counter never finishes (the same one that made
+-	 * measure_clocks() a no-op), so the bus cannot be measured here -- but it plainly
+-	 * answers: every read above and every step below returned a value. Do not let a
+-	 * measurement that cannot work here stop the bring-up at step 6.
++	 * polaris: this SoC's frequency counter never finishes -- the same one 0266 made
++	 * measure_clocks() a no-op for. The register bus itself plainly answers (every
++	 * read above returned a value), which is all the later steps stand on, so do not
++	 * measure it here. The counter is the only thing broken, not the clock.
+ 	 */
+-	if (ahb_hz == MEASURE_FAILED) {
+-		printf("adreno: %u: the register bus clock cannot be measured here; the bus answers, so go on\n", step);
++	ahb_hz = 0;
++	if (1) {
++		printf("adreno: %u: polaris: the register bus answers; not measuring its clock\n", step);
+ 		return true;
+ 	}
+-	if (ahb_hz < 1000000) {
+-		printf("adreno: %u: the register bus measures %u Hz, too slow: not touching the GPU block\n", step, ahb_hz);
++	if (ahb_hz == MEASURE_FAILED) {
++		printf("adreno: %u: the frequency counter did not finish (step 5 shows whether it works)\n", step);
++	} else {
++		printf("adreno: %u: the GPU block's register bus clock (ahb) measures %u Hz\n", step, ahb_hz);
++	}
++	if (ahb_hz == MEASURE_FAILED || ahb_hz < 1000000) {
++		printf("adreno: %u: without that clock a register of the GPU block would not answer: not touching it\n", step);
+ 		return false;
+ 	}
+-	printf("adreno: %u: the GPU block's register bus clock (ahb) measures %u Hz\n", step, ahb_hz);
+ 	return true;
+ }
+ 
