@@ -1,0 +1,66 @@
+Subject: [PATCH] polaris: boot switches to bisect the step-16 reset
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1794,6 +1794,15 @@
+ static const uint8_t *gmu_firmware;
+ static uint64_t gmu_firmware_size;
+ static bool gmu_space_is_on, gmu_runs, gmu_talks, core_is_on, rsc_awake, cx_off;
++
++/*
++ * polaris diagnosis: the board hard-resets right after HFI_CTRL_INIT. Two switches let the
++ * same kernel bisect that without a rebuild -- skip the RSCC/PDC sequence table (whose five
++ * SEQ_MEM words are dipper's; Polaris' vendor driver has no such table at all), or skip the
++ * HFI start itself.
++ */
++static bool skip_rsc_table;
++static bool skip_hfi_start;
+ static void gmu_post_mortem(void);
+ 
+ static bool
+@@ -2104,7 +2113,11 @@
+ 	 * polaris: the sequencer's side first -- see gmu_pdc_rsc_setup(). The bring-up that
+ 	 * read 0xbabeface wrote it before the boot; leaving it to step 16 means after it.
+ 	 */
+-	gmu_pdc_rsc_setup();
++	if (skip_rsc_table) {
++		printf("adreno: %u: adreno_skip_rsc=1: not writing the RSCC/PDC sequence table\n", step);
++	} else {
++		gmu_pdc_rsc_setup();
++	}
+ 	put(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT, 0);
+ 	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
+ 	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, 0x60009000u);
+@@ -2338,6 +2351,14 @@
+ 	gmu_pdc_rsc_setup();
+ 
+ 	announce("ask the GMU to start its message queues");
++	if (skip_hfi_start) {
++		printf("adreno: %u: adreno_skip_hfi=1: not writing HFI_CTRL_INIT; hfi_ctrl_status=%#x\n",
++		    step, rd(gmu.base + GMU_HFI_CTRL_STATUS));
++		return false;
++	}
++	printf("adreno: %u: before HFI_CTRL_INIT: hfi_ctrl_status=%#x gmu2host=%#x rsc_status0=%#x\n",
++	    step, rd(gmu.base + GMU_HFI_CTRL_STATUS), rd(gmu.base + GMU_GMU2HOST_INTR_INFO),
++	    rd(gmu.base + 0x23000u + 0x010u));
+ 	put(&gmu, "hfi_ctrl_init", GMU_HFI_CTRL_INIT, 1);
+ 	if (!wait_for(&gmu, GMU_HFI_CTRL_STATUS, 1, 1, 500)) {
+ 		get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
+@@ -4059,6 +4080,17 @@
+ 	if (PE_parse_boot_argn("display_probe", &only, sizeof(only)) && only) {
+ 		display_probe();
+ 	}
++	{
++		int skip = 0;
++
++		if (PE_parse_boot_argn("adreno_skip_rsc", &skip, sizeof(skip))) {
++			skip_rsc_table = skip != 0;
++		}
++		skip = 0;
++		if (PE_parse_boot_argn("adreno_skip_hfi", &skip, sizeof(skip))) {
++			skip_hfi_start = skip != 0;
++		}
++	}
+ 	if (!PE_parse_boot_argn("adreno", &last_step, sizeof(last_step))) {
+ 		if (!(PE_parse_boot_argn("gpu", &only, sizeof(only)) && only) || !start_by_itself()) {
+ 			return;
