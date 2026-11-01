@@ -1,0 +1,68 @@
+Subject: [PATCH] polaris: HFI table as the bring-up writes it, and map the SFR page
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1774,6 +1774,10 @@
+ #define GMU_LOG_SIZE            0x4000u
+ #define GMU_HFI_ADDRESS         0x60009000u
+ #define GMU_HFI_SIZE            0x4000u         /* the table's page and the three queues' */
++/* the address HFI_SFR_ADDR points the firmware at (0x06030100) -- it writes there during
++ * HFI bring-up, and nothing used to map that window: an untranslated access resets the SoC. */
++#define GMU_SFR_ADDRESS         0x06030000u
++static struct block gmu_sfr;
+ #define GMU_STREAM              5
+ #define GMU_MATCH               0               /* polaris: the GMU uses stream-table entry 0 (verified here);
+ 						 * the 3D core takes 1 */
+@@ -1848,7 +1852,8 @@
+ 		 * format is the only part that a legacy image does not carry.
+ 		 */
+ 		if (!block_new(&gmu_space, &gmu_log, GMU_LOG_ADDRESS, GMU_LOG_SIZE, PTE_GMU) ||
+-		    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, GMU_HFI_SIZE, PTE_GMU)) {
++		    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, GMU_HFI_SIZE, PTE_GMU) ||
++	    !block_new(&gmu_space, &gmu_sfr, GMU_SFR_ADDRESS, PAGE_SIZE, PTE_GMU)) {
+ 			return false;
+ 		}
+ 		announce("give the SMMU's context 1 the GMU's own tables and send its requests (stream 5) through it");
+@@ -1879,7 +1884,8 @@
+ 		}
+ 	}
+ 	if (!block_new(&gmu_space, &gmu_log, GMU_LOG_ADDRESS, GMU_LOG_SIZE, PTE_GMU) ||
+-	    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, GMU_HFI_SIZE, PTE_GMU)) {
++	    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, GMU_HFI_SIZE, PTE_GMU) ||
++	    !block_new(&gmu_space, &gmu_sfr, GMU_SFR_ADDRESS, PAGE_SIZE, PTE_GMU)) {
+ 		return false;
+ 	}
+ 
+@@ -2039,16 +2045,29 @@
+ 		printf("adreno: %u: the page for the messages is not in one piece\n", step);
+ 		return false;
+ 	}
+-	hfi->words = sizeof(struct hfi_table) / 4;
++	/*
++	 * polaris: fill it the way this port's own bring-up fills it (polaris_mi8_flow, its
++	 * step 12): 168 words (6 + 3 * 48, not the 17-slot sizeof), the queue types the
++	 * firmware was built against (0, 4, 5 with priorities 10, 10, 40), and the three
++	 * words at +0x18/+0x1c/+0x20 set -- the a660 code left them 0.
++	 */
++	static const uint8_t queue_id[HFI_QUEUES] = { 0, 4, 5 };
++	hfi->words = 168;
+ 	hfi->first_queue = 6;
+ 	hfi->queue_words = sizeof(struct hfi_queue) / 4;
+ 	hfi->queues = hfi->active_queues = HFI_QUEUES;
+ 	for (unsigned i = 0; i < HFI_QUEUES; i++) {
+ 		hfi->queue[i].start = GMU_HFI_ADDRESS + HFI_QUEUE_AT(i);
+-		hfi->queue[i].type = i | (uint32_t)priority[i] << 8;
++		hfi->queue[i].type = queue_id[i] | (uint32_t)priority[i] << 8;
+ 		hfi->queue[i].words = HFI_QUEUE_WORDS;
+ 		hfi->queue[i].status = 1;
+-	}
++		hfi->queue[i].unused[1] = 1;
++		hfi->queue[i].unused[2] = 1;
++		hfi->queue[i].unused[3] = 1;
++	}
++	printf("adreno: %u: HFI table at %#x: words=%u queues=%u q0=%#x q1=%#x q2=%#x sfr=%#x (polaris)\n",
++	    step, GMU_HFI_ADDRESS, hfi->words, hfi->queues, hfi->queue[0].start,
++	    hfi->queue[1].start, hfi->queue[2].start, GMU_SFR_ADDRESS);
+ 
+ 	announce("tell the GMU where things are, by its registers: the message table, the log, which GPU this is; its "
+ 	    "caches and its use of RPMh; then let its processor out of reset");
