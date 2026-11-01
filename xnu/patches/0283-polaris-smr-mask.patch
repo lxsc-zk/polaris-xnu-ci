@@ -1,0 +1,11 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 12:54:18.614150047 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 12:54:18.618166185 +0800
+@@ -1216,7 +1216,7 @@
+ 
+ #define SMMU_S2CR_FAULT         (2u << 16)
+ #define SMMU_SMR_VALID          (1u << 31)
+-#define SMMU_STREAM_MASK        0x400           /* dt: the second cell of every "iommus" of this SMMU */
++#define SMMU_STREAM_MASK       0x3ffu          /* dt: the second cell of every "iommus" of this SMMU */
+ #define SMMU_CBAR_STAGE_1       (1u << 16 | 3u << 8 | 0xfu << 12)       /* our tables alone decide; weakest defaults */
+ #define SMMU_CBA2R(n)           (0x800 + 4 * (n))                       /* in the second page, like CBAR */
+ #define SMMU_CBA2R_64_BIT       1
