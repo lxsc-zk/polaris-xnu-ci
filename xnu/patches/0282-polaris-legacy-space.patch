@@ -1,0 +1,26 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 12:40:08.982630856 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 12:40:08.998737974 +0800
+@@ -1804,7 +1804,22 @@
+ 		}
+ 		printf("adreno: %u: %llu bytes written to ITCM at %#x\n", step,
+ 		    (unsigned long long)gmu_firmware_size, GMU_WORD(0x0c00));
+-		return true;
++		/*
++		 * The rest the firmware needs is the same either way: the page its
++		 * messages come through and the page its log goes to, both in the
++		 * address space this context will use. The block list of the newer
++		 * format is the only part that a legacy image does not carry.
++		 */
++		if (!block_new(&gmu_space, &gmu_log, GMU_LOG_ADDRESS, GMU_LOG_SIZE, PTE_GMU) ||
++		    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, PAGE_SIZE, PTE_GMU)) {
++			return false;
++		}
++		announce("give the SMMU's context 1 the GMU's own tables and send its requests (stream 5) through it");
++		if (!smmu_layout()) {
++			return false;
++		}
++		gmu_space_is_on = true;
++		return space_on(&gmu_space, GMU_MATCH, GMU_STREAM);
+ 	}
+ 	for (uint64_t at = 0; at + sizeof(struct gmu_firmware_block) <= gmu_firmware_size;) {
+ 		struct gmu_firmware_block block;
