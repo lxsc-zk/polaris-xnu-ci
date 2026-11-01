@@ -1,0 +1,19 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 15:27:00.824586849 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 15:27:00.840907430 +0800
+@@ -1811,7 +1811,15 @@
+ 	if (gmu_firmware_size <= 0x8000) {
+ 		uint64_t at;
+ 
+-		announce("load the GMU's firmware straight into ITCM (the legacy way this GPU takes it)");
++		/*
++		 * The CM3 has to be held in reset while its ITCM is written: with it
++		 * running, a write to 0x1b400 is answered with an external abort
++		 * (the panic on the first word of the image). Step 15 releases this
++		 * reset again once everything else is in place.
++		 */
++		announce("hold the CM3 in reset, then load the GMU's firmware straight into ITCM");
++		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
++		sleep_ms(2);
+ 		for (at = 0; at + 4 <= gmu_firmware_size; at += 4) {
+ 			uint32_t word;
+ 
