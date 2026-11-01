@@ -1,0 +1,60 @@
+--- a/bsd/dev/hakios_polaris_glue.c	2026-11-01 11:23:49.260257324 +0800
++++ b/bsd/dev/hakios_polaris_glue.c	2026-11-01 11:23:49.284499462 +0800
+@@ -8,6 +8,7 @@
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ #include <mach/vm_param.h>
++#include <vm/vm_kern.h>
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ 
+@@ -106,7 +107,48 @@
+ 	if (size != NULL) {
+ 		*size = bytes;
+ 	}
+-	return (const uint8_t *)ml_io_map((vm_offset_t)phys, (vm_size_t)bytes);
++
++	/*
++	 * The payload's blobs are mapped as device memory, and a device mapping
++	 * does not allow the unaligned loads the MDT/ELF walk does: it faults
++	 * with "Unaligned kernel data abort" (esr 0x96000021). Copy the bytes,
++	 * one at a time, into ordinary kernel memory and hand that over; the
++	 * driver may parse it freely there.
++	 */
++	{
++		static const uint8_t *kept[8];
++		static uint64_t kept_size[8];
++		static char kept_name[8][24];
++		vm_offset_t mapped, copy = 0;
++		uint64_t i;
++		int slot;
++
++		for (slot = 0; slot < 8; slot++) {
++			if (kept[slot] != NULL && kept_size[slot] == bytes &&
++			    strncmp(kept_name[slot], name, sizeof(kept_name[0])) == 0) {
++				return kept[slot];
++			}
++		}
++		mapped = ml_io_map((vm_offset_t)phys, (vm_size_t)bytes);
++		if (mapped == 0) {
++			return NULL;
++		}
++		if (kmem_alloc(kernel_map, &copy, round_page(bytes), VM_KERN_MEMORY_BSD) != KERN_SUCCESS) {
++			return NULL;
++		}
++		for (i = 0; i < bytes; i++) {
++			((uint8_t *)copy)[i] = ((const uint8_t *)mapped)[i];
++		}
++		for (slot = 0; slot < 8; slot++) {
++			if (kept[slot] == NULL) {
++				kept[slot] = (const uint8_t *)copy;
++				kept_size[slot] = bytes;
++				strncpy(kept_name[slot], name, sizeof(kept_name[0]) - 1);
++				break;
++			}
++		}
++		return (const uint8_t *)copy;
++	}
+ }
+ 
+ void
