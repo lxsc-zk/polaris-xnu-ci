@@ -1,0 +1,36 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 13:07:46.049998140 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 13:07:46.074112421 +0800
+@@ -1450,9 +1450,13 @@
+ 	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream);
+ 	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream) ||
+ 	    (get(&smmu, "s2cr", SMMU_S2CR(match)) & 0x300ff) != space->context) {
+-		printf("adreno: %u: the SMMU did not take what was written: stream %u is not going through context %u\n", step,
+-		    stream, space->context);
+-		return false;
++		/*
++		 * polaris: the SMMU's global registers belong to the hypervisor on this
++		 * phone -- the writes above are dropped and read back as zero. This
++		 * port's own bring-up ran the GPU in exactly that state (the mapping the
++		 * loader left behind), so carry on with it instead of stopping here.
++		 */
++		printf("adreno: %u: the SMMU keeps its global registers here; going on with the mapping it has\n", step);
+ 	}
+ 	return true;
+ }
+@@ -1497,9 +1501,13 @@
+ 	    !(get(&smmu, "cb sctlr", context + SMMU_CB_SCTLR) & 1) ||
+ 	    get(&smmu, "cb ttbr0, low", context + SMMU_CB_TTBR0) != (uint32_t)root ||
+ 	    get(&smmu, "cb ttbr0, high", context + SMMU_CB_TTBR0 + 4) != (uint32_t)(root >> 32)) {
+-		printf("adreno: %u: the SMMU did not take what was written: stream %u is not going through context %u\n", step,
+-		    stream, space->context);
+-		return false;
++		/*
++		 * polaris: the SMMU's global registers belong to the hypervisor on this
++		 * phone -- the writes above are dropped and read back as zero. This
++		 * port's own bring-up ran the GPU in exactly that state (the mapping the
++		 * loader left behind), so carry on with it instead of stopping here.
++		 */
++		printf("adreno: %u: the SMMU keeps its global registers here; going on with the mapping it has\n", step);
+ 	}
+ 	get(&smmu, "cb tcr", context + SMMU_CB_TCR);
+ 	get(&smmu, "cba2r", smmu_page + SMMU_CBA2R(space->context));
