@@ -1,0 +1,15 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 11:56:26.866485761 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 11:56:26.870544270 +0800
+@@ -1800,10 +1800,10 @@
+ 			uint32_t word;
+ 
+ 			memcpy(&word, gmu_firmware + at, sizeof(word));
+-			put(&gmu, "itcm", GMU_ITCM + (uint32_t)at, word);
++			put(&gmu, "itcm", GMU_WORD(0x0c00) + (uint32_t)at, word);
+ 		}
+ 		printf("adreno: %u: %llu bytes written to ITCM at %#x\n", step,
+-		    (unsigned long long)gmu_firmware_size, GMU_ITCM);
++		    (unsigned long long)gmu_firmware_size, GMU_WORD(0x0c00));
+ 		return true;
+ 	}
+ 	for (uint64_t at = 0; at + sizeof(struct gmu_firmware_block) <= gmu_firmware_size;) {
