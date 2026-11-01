@@ -1,0 +1,24 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 13:55:29.305384102 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 13:55:36.346191494 +0800
+@@ -958,7 +958,9 @@
+ 	}
+ 	announce("read registers of the GMU (0x3d6a000): the first words from the GPU block itself");
+ 	get(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET);
+-	get(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG);
++	/* A630: 0x1f801 is a byte; a 32-bit access faults (esr 0x96000021). */
++	printf("adreno: %u: gmu cm3_boot_config (0x%x) = %#x\n", step,
++	    gmu.phys + GMU_CM3_BOOT_CONFIG, *(volatile uint8_t *)(gmu.base + GMU_CM3_BOOT_CONFIG));
+ 	get(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT);
+ 	get(&gmu, "cm3_cfg", GMU_CM3_CFG);
+ 	get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
+@@ -2043,7 +2045,9 @@
+ 	put(&gmu, "cx_fal_intf", GMU_CX_FAL_INTF, 1);
+ 	put(&gmu, "general_7", GMU_GENERAL_7, 1);
+ 	put(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT, 0);
+-	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
++	printf("adreno: %u: about to write gmu cm3_boot_config at 0x%x: 2 (a byte)\n", step,
++	    gmu.phys + GMU_CM3_BOOT_CONFIG);
++	*(volatile uint8_t *)(gmu.base + GMU_CM3_BOOT_CONFIG) = 2;
+ 	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, GMU_HFI_ADDRESS);
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+ 	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 1u << 31 | (0xa << 2) << 18 | 0x8a0);
