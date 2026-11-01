@@ -1,0 +1,48 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 16:07:52.332463217 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 16:07:52.352491310 +0800
+@@ -917,9 +917,9 @@
+ #define GMU_WORD(n)             (4u * (n))
+ #define GMU_DTCM                GMU_WORD(0x1c00)        /* the processor's 16K of data memory (its code: 0x0c00) */
+ #define GMU_DTCM_VERSIONS       GMU_WORD(0x1c00 + 0xff8) /* five words where loaded firmware carries its versions */
+-#define GMU_CM3_SYSRESET        0x1f800u        /* 1: the processor is held in reset */
+-#define GMU_CM3_BOOT_CONFIG     0x1f801u
+-#define GMU_CM3_FW_INIT_RESULT  0x1f81cu        /* 0xbabeface once firmware has started */
++#define GMU_CM3_SYSRESET        GMU_WORD(0x5000)   /* 0x14000: proven by this port own GMU bring-up */        /* 1: the processor is held in reset */
++#define GMU_CM3_BOOT_CONFIG     GMU_WORD(0x5001)   /* 0x14004 */
++#define GMU_CM3_FW_INIT_RESULT  GMU_WORD(0x501c)   /* 0x14070: where 0xbabeface appears */        /* 0xbabeface once firmware has started */
+ #define GMU_CM3_CFG             GMU_WORD(0x502d)
+ #define GMU_ALWAYS_ON_COUNTER_L GMU_WORD(0x5088)        /* counts the 19.2 MHz crystal */
+ #define GMU_ALWAYS_ON_COUNTER_H GMU_WORD(0x5089)
+@@ -959,14 +959,7 @@
+ 	announce("read registers of the GMU (0x3d6a000): the first words from the GPU block itself");
+ 	get(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET);
+ 	/* A630: 0x1f801 is a byte; a 32-bit access faults (esr 0x96000021). */
+-	/*
+-	 * The AHB bridge here only takes 32-bit accesses to this register: a byte
+-	 * access at 0x1f801 is answered with SLVERR (esr 0x96000010). boot_config
+-	 * is byte 1 of the word at 0x1f800, so read that word and take the byte.
+-	 */
+-	printf("adreno: %u: gmu cm3_boot_config (0x%x) = %#x\n", step,
+-	    gmu.phys + GMU_CM3_BOOT_CONFIG,
+-	    (rd(gmu.base + (GMU_CM3_BOOT_CONFIG & ~3u)) >> (8 * (GMU_CM3_BOOT_CONFIG & 3u))) & 0xffu);
++	get(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG);
+ 	get(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT);
+ 	get(&gmu, "cm3_cfg", GMU_CM3_CFG);
+ 	get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
+@@ -2064,15 +2057,7 @@
+ 	put(&gmu, "cx_fal_intf", GMU_CX_FAL_INTF, 1);
+ 	put(&gmu, "general_7", GMU_GENERAL_7, 1);
+ 	put(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT, 0);
+-	printf("adreno: %u: about to set gmu cm3_boot_config (byte 1 of 0x%x) to 2\n", step,
+-	    gmu.phys + (GMU_CM3_BOOT_CONFIG & ~3u));
+-	{
+-		uint32_t shift = 8u * (GMU_CM3_BOOT_CONFIG & 3u);
+-		uint32_t word = rd(gmu.base + (GMU_CM3_BOOT_CONFIG & ~3u));
+-
+-		word = (word & ~(0xffu << shift)) | (2u << shift);
+-		wr(gmu.base + (GMU_CM3_BOOT_CONFIG & ~3u), word);
+-	}
++	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
+ 	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, GMU_HFI_ADDRESS);
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+ 	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 1u << 31 | (0xa << 2) << 18 | 0x8a0);
