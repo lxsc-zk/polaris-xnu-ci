@@ -1,0 +1,42 @@
+Subject: [PATCH] polaris: print the CM3 diagnosis in one block on the failure path
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2181,6 +2181,37 @@
+ 	get(&gmu, "ao_host_interrupt_status", GMU_AO_HOST_INTERRUPT_STATUS);
+ 	get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
+ 	if (space_faulted(&gmu_space) || (result & GMU_STARTED_MASK) != GMU_STARTED) {
++		/*
++		 * One block with everything that decides this, at the end where the screen still
++		 * shows it: the reset bit's own readback, the CM3's configuration, the GMU clock,
++		 * the firmware's first word in ITCM, and the sequencer's state. On this board the
++		 * console is the only channel -- the disk log only starts once the root mounts.
++		 */
++		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		uint32_t reset_after_1 = rd(gmu.base + GMU_CM3_SYSRESET);
++		sleep_us(50);
++		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 0);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		sleep_ms(2);
++		uint32_t itcm0 = gmu_firmware != NULL ? rd(gmu.base + GMU_ITCM) : 0xffffffffu;
++		uint32_t want0 = 0xffffffffu;
++		if (gmu_firmware != NULL) {
++			memcpy(&want0, gmu_firmware, sizeof(want0));
++		}
++		printf("adreno: %u: DIAG reset: after writing 1 it reads %#x; after 0 it reads %#x\n",
++		    step, reset_after_1, rd(gmu.base + GMU_CM3_SYSRESET));
++		printf("adreno: %u: DIAG cm3_cfg=%#x boot_config=%#x fw_init_result=%#x started_mask=%#x\n",
++		    step, rd(gmu.base + GMU_CM3_CFG), rd(gmu.base + GMU_CM3_BOOT_CONFIG),
++		    rd(gmu.base + GMU_CM3_FW_INIT_RESULT), result & GMU_STARTED_MASK);
++		printf("adreno: %u: DIAG cx_gmu_cbcr=%#x pdc_enable=%#x rscc_status0=%#x rscc_seq_busy=%#x\n",
++		    step, rd(gpucc.base + GPUCC_CX_GMU_CBCR), rd(0x0b280000u + 4u * 0x1140u),
++		    rd(gmu.base + 0x23000u + 0x010u), rd(gmu.base + 0x23000u + 0x404u));
++		printf("adreno: %u: DIAG ITCM[0]=%#x firmware[0]=%#x %s; gmu itcm write-read %s\n",
++		    step, itcm0, want0, itcm0 == want0 ? "match" : "DIFFER",
++		    itcm0 == want0 ? "lands" : "does not land");
++		printf("adreno: %u: DIAG gmu 0x14000=%#x 0x14004=%#x 0x14070=%#x (same block reread)\n",
++		    step, rd(gmu.base + 0x14000u), rd(gmu.base + 0x14004u), rd(gmu.base + 0x14070u));
+ 		printf("adreno: %u: the GMU's firmware does not come up\n", step);
+ 		gmu_post_mortem();
+ 		return false;
