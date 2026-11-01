@@ -1,0 +1,35 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 13:24:38.167814479 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 13:24:38.195855006 +0800
+@@ -2048,7 +2048,10 @@
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+ 	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 1u << 31 | (0xa << 2) << 18 | 0x8a0);
+ 	put(&gmu, "cm3_cfg", GMU_CM3_CFG, 0x4052);
++	/* polaris: the GBIF window does not answer here (see step 6): skipping this write */
++	if (0) {
+ 	put(&gbif, "halt", GBIF_HALT, 0);
++	}
+ 	put(&gmu, "pwr_col_cp_resp", GMU_PWR_COL_CP_RESP, 0);
+ 	put(&gmu, "hfi_sfr_addr", GMU_HFI_SFR_ADDR, GMU_CHIP);
+ 	put(&gmu, "pwr_col_cp_msg", GMU_PWR_COL_CP_MSG, GMU_LOG_ADDRESS | (GMU_LOG_SIZE / 4096 - 1));
+@@ -2799,7 +2802,10 @@
+ 	}
+ 	announce("write the 3D core's registers as Linux does before it starts the command processor: the first writes "
+ 	    "to the core itself");
++	/* polaris: the GBIF window does not answer here (see step 6): skipping this write */
++	if (0) {
+ 	put(&gbif, "halt", GBIF_HALT, 0);
++	}
+ 	put(&gpu, "rbbm_gbif_halt", RBBM_GBIF_HALT, 0);
+ 	put(&gpu, "rbbm_secvid_tsb_cntl", RBBM_SECVID_TSB_CNTL, 0);
+ 	put64(&gpu, "rbbm_secvid_tsb_trusted_base", RBBM_SECVID_TSB_TRUSTED_BASE, 0);
+@@ -2808,7 +2814,10 @@
+ 		put(&gpu, "address mode: 64 bits", GPU_WORD(address_modes[i]), 1);
+ 	}
+ 	for (unsigned i = 0; i < 4; i++) {
++		/* polaris: the GBIF window does not answer here (see step 6): skipping this write */
++		if (0) {
+ 		put(&gbif, "qsb_side", GBIF_QSB_SIDE0 + 4 * i, 0x00071620);
++		}
+ 	}
+ 	put(&gpu, "rbbm_gbif_client_qos_cntl", RBBM_GBIF_CLIENT_QOS_CNTL, 3);
+ 	put(&gpu, "rbbm_perfctr_gpu_busy_masked", RBBM_PERFCTR_GPU_BUSY_MASKED, 0xffffffff);
