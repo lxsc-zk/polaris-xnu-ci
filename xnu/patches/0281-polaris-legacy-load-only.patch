@@ -1,0 +1,96 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 12:19:01.083301597 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 12:19:01.111314928 +0800
+@@ -1793,87 +1793,14 @@
+ 	 *     }
+ 	 */
+ 	if (gmu_firmware_size <= 0x8000) {
+-		uint64_t at;
+-
+-		announce("load the GMU's firmware straight into ITCM (the legacy way this GPU takes it)");
+-		for (at = 0; at + 4 <= gmu_firmware_size; at += 4) {
+-			uint32_t word;
+-
+-			memcpy(&word, gmu_firmware + at, sizeof(word));
+-			put(&gmu, "itcm", GMU_WORD(0x0c00) + (uint32_t)at, word);
+-		}
+-		printf("adreno: %u: %llu bytes written to ITCM at %#x\n", step,
+-		    (unsigned long long)gmu_firmware_size, GMU_WORD(0x0c00));
++		/*
++		 * polaris (Adreno 630) is a legacy GMU: step 13 already put the whole image
++		 * into ITCM (the way a6xx_gmu_fw_load() does for gmu->legacy), so there is
++		 * nothing here to copy. The processor is started by step 15.
++		 */
++		printf("adreno: %u: legacy GMU: the firmware is already in ITCM, nothing to copy\n", step);
+ 		return true;
+ 	}
+-	for (uint64_t at = 0; at + sizeof(struct gmu_firmware_block) <= gmu_firmware_size;) {
+-		struct gmu_firmware_block block;
+-
+-		memcpy(&block, gmu_firmware + at, sizeof(block));
+-		at += sizeof(block) + block.size;
+-		if (at > gmu_firmware_size) {
+-			printf("adreno: %u: the file ends inside a block\n", step);
+-			return false;
+-		}
+-		if (block.size != 0 || (block.type != GMU_FIRMWARE_NEEDS && block.type != GMU_FIRMWARE_NEEDS_KEPT) ||
+-		    in_tcm(block.address)) {
+-			continue;
+-		}
+-		if (gmu_block_count == sizeof(gmu_blocks) / sizeof(gmu_blocks[0]) || (block.address & 4095) ||
+-		    block.value > 0x100000 || !block_new(&gmu_space, &gmu_blocks[gmu_block_count++], block.address, block.value,
+-		    PTE_GMU)) {
+-			printf("adreno: %u: cannot make %#x bytes at %#x for the firmware\n", step, block.value, block.address);
+-			return false;
+-		}
+-	}
+-	if (!block_new(&gmu_space, &gmu_log, GMU_LOG_ADDRESS, GMU_LOG_SIZE, PTE_GMU) ||
+-	    !block_new(&gmu_space, &gmu_hfi, GMU_HFI_ADDRESS, PAGE_SIZE, PTE_GMU)) {
+-		return false;
+-	}
+-
+-	announce("give the SMMU's context 1 these tables and send the GMU's requests (stream 5) through it: the first "
+-	    "writes to the SMMU, the global ones (cbar, cba2r, s2cr, smr) through the hypervisor");
+-	if (!smmu_layout()) {
+-		return false;
+-	}
+-	gmu_space_is_on = true;         /* whatever of it has been written by the time something fails is taken back */
+-	return space_on(&gmu_space, GMU_MATCH, GMU_STREAM);
+-}
+-
+-/* ---- step 14: the GMU's firmware ----------------------------------------------------------------------- */
+-
+-#define GMU_ITCM                GMU_WORD(0x0c00)
+-
+-static bool
+-step_gmu_firmware(void)
+-{
+-	uint32_t wrong = 0;
+-
+-	if (!cx_ready() || gmu_firmware == NULL) {
+-		return false;
+-	}
+-	/*
+-	 * polaris (Adreno 630) is a legacy GMU as Linux calls it: the firmware is
+-	 * already in ITCM from step 13 and the processor runs as soon as its reset
+-	 * is released. a6xx_gmu_start() does exactly this and then waits for the
+-	 * firmware to write 0xbabeface into GMU_CM3_FW_INIT_RESULT.
+-	 */
+-	if (gmu_firmware_size <= 0x8000) {
+-		uint32_t result = 0;
+-
+-		announce("release the CM3's reset and wait for the firmware to say it started (the legacy way)");
+-		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 0);
+-		for (int i = 0; i < 500; i++) {
+-			result = rd(gmu.base + GMU_CM3_FW_INIT_RESULT);
+-			if (result == 0xbabefaceu) {
+-				break;
+-			}
+-			sleep_ms(2);
+-		}
+-		printf("adreno: %u: cm3_fw_init_result = %#x %s\n", step, result,
+-		    result == 0xbabefaceu ? "THE GMU'S FIRMWARE IS RUNNING" : "the CM3 did not say it started");
+-		return result == 0xbabefaceu;
+-	}
+ 	announce("load the GMU's firmware: its first 16K of code and of data through the GMU's registers (0x3d6d000, "
+ 	    "0x3d71000), the rest into the memory just made");
+ 	put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
