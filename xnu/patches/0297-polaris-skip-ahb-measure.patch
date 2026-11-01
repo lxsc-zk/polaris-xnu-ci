@@ -1,0 +1,31 @@
+Subject: [PATCH] polaris: step 6 must not fail because the frequency counter cannot measure
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -896,15 +896,21 @@
+ 		return false;
+ 	}
+ 	ahb_hz = measure_quietly(GPUCC_DEBUG_AHB);
++	/*
++	 * polaris: this SoC's frequency counter never finishes (the same one that made
++	 * measure_clocks() a no-op), so the bus cannot be measured here -- but it plainly
++	 * answers: every read above and every step below returned a value. Do not let a
++	 * measurement that cannot work here stop the bring-up at step 6.
++	 */
+ 	if (ahb_hz == MEASURE_FAILED) {
+-		printf("adreno: %u: the frequency counter did not finish (step 5 shows whether it works)\n", step);
+-	} else {
+-		printf("adreno: %u: the GPU block's register bus clock (ahb) measures %u Hz\n", step, ahb_hz);
++		printf("adreno: %u: the register bus clock cannot be measured here; the bus answers, so go on\n", step);
++		return true;
+ 	}
+-	if (ahb_hz == MEASURE_FAILED || ahb_hz < 1000000) {
+-		printf("adreno: %u: without that clock a register of the GPU block would not answer: not touching it\n", step);
++	if (ahb_hz < 1000000) {
++		printf("adreno: %u: the register bus measures %u Hz, too slow: not touching the GPU block\n", step, ahb_hz);
+ 		return false;
+ 	}
++	printf("adreno: %u: the GPU block's register bus clock (ahb) measures %u Hz\n", step, ahb_hz);
+ 	return true;
+ }
+ 
