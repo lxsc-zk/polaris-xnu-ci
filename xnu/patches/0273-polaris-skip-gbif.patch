@@ -1,0 +1,23 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 10:42:11.282067400 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 10:42:11.298067400 +0800
+@@ -986,12 +986,14 @@
+ 	printf("adreno: 6: MARKER past the DTCM reads, before gbif\n");
+ 	printf("adreno: 6: MARKER gbif phys %#x size %#x, cx_misc phys %#x\n",
+ 	    gbif.phys, gbif.size, cx_misc.phys);
+-	announce("read the GPU's bus interface (0x3d0f000) and the CX odds and ends (0x3d9e000)");
+-	get(&gbif, "scache_cntl0", GBIF_SCACHE_CNTL0);
+-	get(&gbif, "halt", GBIF_HALT);
+-	get(&gbif, "halt_ack", GBIF_HALT_ACK);
+-	get(&cx_misc, "system_cache_cntl_0", CX_MISC_SYSTEM_CACHE_CNTL_0);
+-	get(&cx_misc, "system_cache_cntl_1", CX_MISC_SYSTEM_CACHE_CNTL_1);
++	/*
++	 * polaris: the GBIF window at 0x500f000 and cx_misc at 0x509e000 do not take a
++	 * read here (a data abort follows the first one), and nothing later in the
++	 * start uses what they hold: they are looked at only to say what they are.
++	 * Skip them rather than stop the start at a diagnostic.
++	 */
++	printf("adreno: 6: MARKER gbif/cx_misc reads skipped on polaris\n");
++	return true;
+ 	printf("adreno: 6: MARKER end of step 6, returning true\n");
+ 	return true;
+ }
