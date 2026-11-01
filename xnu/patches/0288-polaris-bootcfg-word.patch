@@ -1,0 +1,37 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 15:13:45.058599211 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 15:13:45.083009745 +0800
+@@ -959,8 +959,14 @@
+ 	announce("read registers of the GMU (0x3d6a000): the first words from the GPU block itself");
+ 	get(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET);
+ 	/* A630: 0x1f801 is a byte; a 32-bit access faults (esr 0x96000021). */
++	/*
++	 * The AHB bridge here only takes 32-bit accesses to this register: a byte
++	 * access at 0x1f801 is answered with SLVERR (esr 0x96000010). boot_config
++	 * is byte 1 of the word at 0x1f800, so read that word and take the byte.
++	 */
+ 	printf("adreno: %u: gmu cm3_boot_config (0x%x) = %#x\n", step,
+-	    gmu.phys + GMU_CM3_BOOT_CONFIG, *(volatile uint8_t *)(gmu.base + GMU_CM3_BOOT_CONFIG));
++	    gmu.phys + GMU_CM3_BOOT_CONFIG,
++	    (rd(gmu.base + (GMU_CM3_BOOT_CONFIG & ~3u)) >> (8 * (GMU_CM3_BOOT_CONFIG & 3u))) & 0xffu);
+ 	get(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT);
+ 	get(&gmu, "cm3_cfg", GMU_CM3_CFG);
+ 	get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
+@@ -2045,9 +2051,15 @@
+ 	put(&gmu, "cx_fal_intf", GMU_CX_FAL_INTF, 1);
+ 	put(&gmu, "general_7", GMU_GENERAL_7, 1);
+ 	put(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT, 0);
+-	printf("adreno: %u: about to write gmu cm3_boot_config at 0x%x: 2 (a byte)\n", step,
+-	    gmu.phys + GMU_CM3_BOOT_CONFIG);
+-	*(volatile uint8_t *)(gmu.base + GMU_CM3_BOOT_CONFIG) = 2;
++	printf("adreno: %u: about to set gmu cm3_boot_config (byte 1 of 0x%x) to 2\n", step,
++	    gmu.phys + (GMU_CM3_BOOT_CONFIG & ~3u));
++	{
++		uint32_t shift = 8u * (GMU_CM3_BOOT_CONFIG & 3u);
++		uint32_t word = rd(gmu.base + (GMU_CM3_BOOT_CONFIG & ~3u));
++
++		word = (word & ~(0xffu << shift)) | (2u << shift);
++		wr(gmu.base + (GMU_CM3_BOOT_CONFIG & ~3u), word);
++	}
+ 	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, GMU_HFI_ADDRESS);
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+ 	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 1u << 31 | (0xa << 2) << 18 | 0x8a0);
