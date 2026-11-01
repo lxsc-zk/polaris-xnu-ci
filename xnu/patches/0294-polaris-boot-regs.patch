@@ -1,0 +1,25 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-01 16:34:06.909300290 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-01 16:34:06.946098410 +0800
+@@ -2059,17 +2059,18 @@
+ 	put(&gmu, "general_7", GMU_GENERAL_7, 1);
+ 	put(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT, 0);
+ 	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
+-	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, GMU_HFI_ADDRESS);
++	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, 0x60009000u);
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+-	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 1u << 31 | (0xa << 2) << 18 | 0x8a0);
++	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 0x802800a0u);
+ 	put(&gmu, "cm3_cfg", GMU_CM3_CFG, 0x4052);
+ 	/* polaris: the GBIF window does not answer here (see step 6): skipping this write */
+ 	if (0) {
+ 	put(&gbif, "halt", GBIF_HALT, 0);
+ 	}
+ 	put(&gmu, "pwr_col_cp_resp", GMU_PWR_COL_CP_RESP, 0);
+-	put(&gmu, "hfi_sfr_addr", GMU_HFI_SFR_ADDR, GMU_CHIP);
+-	put(&gmu, "pwr_col_cp_msg", GMU_PWR_COL_CP_MSG, GMU_LOG_ADDRESS | (GMU_LOG_SIZE / 4096 - 1));
++	put(&gmu, "wfi_config", GMU_WORD(0x5002), 0);   /* our own bring-up writes this */
++	put(&gmu, "hfi_sfr_addr", GMU_HFI_SFR_ADDR, 0x06030100u);
++	put(&gmu, "pwr_col_cp_msg", GMU_PWR_COL_CP_MSG, 0x60005003u);
+ 	put(&gmu, "sys_bus_config", GMU_SYS_BUS_CONFIG, 1);
+ 	put(&gmu, "icache_config", GMU_ICACHE_CONFIG, 1);
+ 	put(&gmu, "dcache_config", GMU_DCACHE_CONFIG, 1);
