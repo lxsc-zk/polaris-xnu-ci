@@ -1,0 +1,91 @@
+Subject: [PATCH] polaris: an HFI mode with SMMU bypass and physical addresses
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1803,6 +1803,9 @@
+  */
+ static bool skip_rsc_table;
+ static bool skip_hfi_start;
++static bool hfi_bypass;         /* adreno_hfi_bypass=1: the firmware sees physical addresses */
++static uint32_t hfi_phys, log_phys;
++static uint32_t gmu_bypass_slot[2] = { 0, 1 };
+ static void gmu_post_mortem(void);
+ 
+ static bool
+@@ -1921,6 +1924,24 @@
+ 	if (!space_stream(&gmu_space, 1, 4)) {
+ 		printf("adreno: %u: polaris: stream 4 will not take; the firmware's table reads may fault\n", step);
+ 	}
++	/*
++	 * polaris: bypass, the mode polaris_hfi_map() uses on this board -- S2CR first with
++	 * TYPE=2, then the SMR valid with the SID (written in that order, as the bring-up
++	 * notes: once the SMR is valid the entry latches and a later S2CR write is dropped).
++	 */
++	if (hfi_bypass) {
++		static const uint32_t sids[2] = { 5, 4 };
++
++		for (unsigned i = 0; i < 2; i++) {
++			put(&smmu, "s2cr", SMMU_S2CR(gmu_bypass_slot[i]), 0x00020300u);
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			put(&smmu, "smr", SMMU_SMR(gmu_bypass_slot[i]), SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | sids[i]);
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("adreno: %u: polaris: bypass slot %u for SID %u: smr=%#x s2cr=%#x\n", step,
++			    gmu_bypass_slot[i], sids[i], rd(smmu.base + SMMU_SMR(gmu_bypass_slot[i])),
++			    rd(smmu.base + SMMU_S2CR(gmu_bypass_slot[i])));
++		}
++	}
+ 	for (unsigned i = 0; i < 5; i++) {
+ 		printf("adreno: %u: polaris: SMMU slot %u: smr=%#x s2cr=%#x\n", step, i,
+ 		    rd(smmu.base + SMMU_SMR(i)), rd(smmu.base + SMMU_S2CR(i)));
+@@ -2095,6 +2116,12 @@
+ 		for (uint32_t i = 0; i < GMU_HFI_SIZE / 4u; i++) {
+ 			t[i] = 0;
+ 		}
++		/*
++		 * polaris: in bypass mode the firmware sees physical addresses, which is what
++		 * polaris_hfi_build_pages() advertises on this board.
++		 */
++		hfi_phys = hfi_bypass ? (uint32_t)kvtophys((vm_offset_t)gmu_hfi.memory) : GMU_HFI_ADDRESS;
++		log_phys = hfi_bypass ? (uint32_t)kvtophys((vm_offset_t)gmu_log.memory) : GMU_LOG_ADDRESS;
+ 		t[0] = 0;                       /* version */
+ 		t[1] = 42;                      /* the table's size in words */
+ 		t[2] = 6;                       /* first queue, in words */
+@@ -2104,7 +2131,7 @@
+ 		for (uint32_t i = 0; i < 3; i++) {
+ 			uint32_t b = 0x18u + i * 48u;
+ 
+-			t[(b + 0x00u) / 4u] = GMU_HFI_ADDRESS + 168u + i * (4096u + 16u);
++			t[(b + 0x00u) / 4u] = hfi_phys + 168u + i * (4096u + 16u);
+ 			t[(b + 0x04u) / 4u] = (uint32_t)queue_id[i] | ((uint32_t)queue_prio[i] << 8);
+ 			t[(b + 0x08u) / 4u] = 1;
+ 			t[(b + 0x0cu) / 4u] = 1024;
+@@ -2166,7 +2193,7 @@
+ 	gmu_rail_vote();
+ 	put(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT, 0);
+ 	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
+-	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, GMU_HFI_ADDRESS);
++	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, hfi_bypass ? hfi_phys : GMU_HFI_ADDRESS);
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+ 	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 0x802800a0u);
+ 	put(&gmu, "cm3_cfg", GMU_CM3_CFG, 0x4052);
+@@ -2177,7 +2204,8 @@
+ 	put(&gmu, "pwr_col_cp_resp", GMU_PWR_COL_CP_RESP, 0);
+ 	put(&gmu, "wfi_config", GMU_WORD(0x5002), 0);   /* our own bring-up writes this */
+ 	put(&gmu, "hfi_sfr_addr", GMU_HFI_SFR_ADDR, 0x06030100u);
+-	put(&gmu, "pwr_col_cp_msg", GMU_PWR_COL_CP_MSG, GMU_LOG_ADDRESS | (GMU_LOG_SIZE / PAGE_SIZE - 1));
++	put(&gmu, "pwr_col_cp_msg", GMU_PWR_COL_CP_MSG,
++	    (hfi_bypass ? log_phys : GMU_LOG_ADDRESS) | (GMU_LOG_SIZE / PAGE_SIZE - 1));
+ 	put(&gmu, "sys_bus_config", GMU_SYS_BUS_CONFIG, 1);
+ 	put(&gmu, "icache_config", GMU_ICACHE_CONFIG, 1);
+ 	put(&gmu, "dcache_config", GMU_DCACHE_CONFIG, 1);
+@@ -4297,6 +4325,10 @@
+ 		if (PE_parse_boot_argn("adreno_skip_hfi", &skip, sizeof(skip))) {
+ 			skip_hfi_start = skip != 0;
+ 		}
++		skip = 0;
++		if (PE_parse_boot_argn("adreno_hfi_bypass", &skip, sizeof(skip))) {
++			hfi_bypass = skip != 0;
++		}
+ 	}
+ 	if (!PE_parse_boot_argn("adreno", &last_step, sizeof(last_step))) {
+ 		if (!(PE_parse_boot_argn("gpu", &only, sizeof(only)) && only) || !start_by_itself()) {
