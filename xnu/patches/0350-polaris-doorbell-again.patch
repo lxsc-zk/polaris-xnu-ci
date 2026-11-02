@@ -1,0 +1,19 @@
+Subject: [PATCH] polaris: ring the doorbell again while waiting for an answer
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3616,6 +3616,14 @@
+ 	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
+ 	for (int i = 0; i < 100000 && !answered; i++) {
+ 		sleep_us(20);
++		/*
++		 * polaris: the firmware did not act on the first doorbell -- in the bring-up the
++		 * same five words were answered off it in 25 polls. Ring it again every 5 ms; a
++		 * repeated set bit is harmless and is what a tight poll loop amounts to.
++		 */
++		if (i % 250 == 249) {
++			wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
++		}
+ 		if (hfi_number == 1 && i == 500) {
+ 			printf("adreno: %u: HFI probe: after 10 ms no answer yet, gmu2host=%#x hfi_status=%#x\n", step,
+ 			    rd(gmu.base + GMU_GMU2HOST_INTR_INFO), rd(gmu.base + GMU_HFI_CTRL_STATUS));
