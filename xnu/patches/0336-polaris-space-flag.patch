@@ -1,0 +1,12 @@
+Subject: [PATCH] polaris: set gmu_space_is_on when the working space is built
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3237,6 +3237,7 @@
+ 		}
+ 		printf("adreno: %u: polaris: firmware into ITCM: %u words read back wrong\n", step, bad);
+ 	}
++	gmu_space_is_on = true;         /* step 15 will not start the CM3 without it */
+ 	return true;
+ }
+ 
