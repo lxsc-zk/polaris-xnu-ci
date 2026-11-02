@@ -1,0 +1,43 @@
+Subject: [PATCH] polaris: set the queue's write index by explicit address and verify it
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3549,18 +3549,29 @@
+ 		data[at] = i < words ? message[i] : 0xfafafafa;
+ 		at = (at + 1) % HFI_QUEUE_WORDS;
+ 	}
+-	queue->write = at;
+ 	/*
+-	 * polaris: the queue is cached memory; the GMU reads DRAM. The working sender flushes
+-	 * the whole buffer here (polaris_pt_clean); a bare dsb leaves the message in this CPU's
+-	 * cache and the firmware sees zeros.
++	 * polaris: the write index is what tells the firmware there is work; set it by explicit
++	 * address (table + 0x44 = the queue entry's +0x2c), clean that line on its own, and read
++	 * it back before trusting it.
+ 	 */
+-	to_memory((vm_offset_t)hfi, 0x4000u);
+-	if (hfi_number == 1) {
+-		volatile uint32_t *back = (volatile uint32_t *)data;
++	{
++		vm_offset_t index_at = (vm_offset_t)hfi + 0x44u;
++		uint32_t before = rd(index_at);
+ 
+-		printf("adreno: %u: HFI probe: in memory now: %#x %#x %#x %#x (table write=%u status=%u)\n", step,
+-		    back[0], back[1], back[2], back[3], queue->write, queue->status);
++		wr(index_at, at);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		to_memory(index_at & ~(vm_offset_t)63, 64);
++		to_memory((vm_offset_t)hfi, 0x4000u);
++		if (hfi_number == 1) {
++			volatile uint32_t *back = (volatile uint32_t *)data;
++
++			printf("adreno: %u: HFI probe: write index %u -> %u (read back %u), in memory: %#x %#x %#x %#x\n",
++			    step, before, at, rd(index_at), back[0], back[1], back[2], back[3]);
++		}
++		if (rd(index_at) != at) {
++			printf("adreno: %u: polaris: the write index will not stick (%u); sending anyway\n", step,
++			    rd(index_at));
++		}
+ 	}
+ 	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
+ 	for (int i = 0; i < 100000 && !answered; i++) {
