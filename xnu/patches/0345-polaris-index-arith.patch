@@ -1,0 +1,34 @@
+Subject: [PATCH] polaris: compute the queue write index from the pre-loop value
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3533,7 +3533,8 @@
+ {
+ 	volatile struct hfi_queue *queue = &hfi->queue[0];
+ 	volatile uint32_t *data = (volatile uint32_t *)((vm_offset_t)hfi + HFI_QUEUE_AT(0));
+-	uint32_t at = queue->write % HFI_QUEUE_WORDS, number = ++hfi_number & 0xfff, verdict = 0, waiting = 0;
++	uint32_t at = queue->write % HFI_QUEUE_WORDS, start_at = at;
++	uint32_t number = ++hfi_number & 0xfff, verdict = 0, waiting = 0;
+ 	bool answered = false;
+ 
+ 	message[0] = id | words << 8 | number << 20;
+@@ -3558,6 +3559,8 @@
+ 		vm_offset_t index_at = (vm_offset_t)hfi + 0x44u;
+ 		uint32_t before = rd(index_at);
+ 
++		/* polaris: derive it from where we started, not from the loop's cursor */
++		at = (start_at + ((words + 3u) / 4u) * 4u) % HFI_QUEUE_WORDS;
+ 		wr(index_at, at);
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+ 		to_memory(index_at & ~(vm_offset_t)63, 64);
+@@ -3565,8 +3568,8 @@
+ 		if (hfi_number == 1) {
+ 			volatile uint32_t *back = (volatile uint32_t *)data;
+ 
+-			printf("adreno: %u: HFI probe: write index %u -> %u (read back %u), in memory: %#x %#x %#x %#x\n",
+-			    step, before, at, rd(index_at), back[0], back[1], back[2], back[3]);
++			printf("adreno: %u: HFI probe: write index %u -> %u (read back %u) for %u words, in memory: "
++			    "%#x %#x %#x %#x\n", step, before, at, rd(index_at), words, back[0], back[1], back[2], back[3]);
+ 		}
+ 		if (rd(index_at) != at) {
+ 			printf("adreno: %u: polaris: the write index will not stick (%u); sending anyway\n", step,
