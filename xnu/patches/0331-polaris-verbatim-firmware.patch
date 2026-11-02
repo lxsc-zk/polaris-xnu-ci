@@ -1,0 +1,14 @@
+Subject: [PATCH] polaris: load the GMU firmware in the verbatim flow
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2819,6 +2819,9 @@
+ 	uint32_t v;
+ 	int i;
+ 
++	if (gmu_firmware == NULL) {
++		gmu_firmware = image_file("fw", "a660_gmu.bin", &gmu_firmware_size);
++	}
+ 	/* the blocks are mapped lazily on first use; this path runs before the steps do it */
+ 	need(&gcc);
+ 	need(&gpucc);
