@@ -1,0 +1,61 @@
+Subject: [PATCH] polaris: send the legacy five one by one and report each verdict
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2741,11 +2741,17 @@
+ 	}
+ 	m[1] = 0; m[2] = 0x60001000u; m[3] = 0x4000u; m[4] = 1u;
+ 	ok = hfi_send("the legacy INIT", 0, m, 5);
++	printf("adreno: %u: polaris: legacy message 0 (INIT): %s\n", step, ok ? "accepted" : "refused");
+ 	for (unsigned i = 0; i < 160; i++) {
+ 		m[i] = 0;
+ 	}
+ 	m[1] = (1u << 28) | (1u << 19) | (1u << 17);
+-	ok = ok && hfi_send("the firmware version", 1, m, 2);
++	{
++		bool r = hfi_send("the firmware version", 1, m, 2);
++
++		printf("adreno: %u: polaris: legacy message 1 (FW_VERSION): %s\n", step, r ? "accepted" : "refused");
++		ok = ok && r;
++	}
+ 	for (unsigned i = 0; i < 160; i++) {
+ 		m[i] = 0;
+ 	}
+@@ -2754,7 +2760,12 @@
+ 		m[3u + 2u * i] = (gk[i] ? 64u : 0u) << 16 | (i << 8) | i;
+ 		m[4u + 2u * i] = gk[i];
+ 	}
+-	ok = ok && hfi_send("the speed table", 4, m, 43);
++	{
++		bool r = hfi_send("the speed table", 4, m, 43);
++
++		printf("adreno: %u: polaris: legacy message 4 (PERF, 43 words): %s\n", step, r ? "accepted" : "refused");
++		ok = ok && r;
++	}
+ 	for (unsigned i = 0; i < 160; i++) {
+ 		m[i] = 0;
+ 	}
+@@ -2764,11 +2775,21 @@
+ 	m[18] = 0x60000001u; m[19] = 0x20000001u; m[20] = 0x60000001u;
+ 	m[24] = 0x50000u; m[25] = 0x5005cu; m[26] = 0x5000cu;
+ 	m[32] = 0x40000000u; m[33] = 0x40000000u; m[34] = 0x40000000u;
+-	ok = ok && hfi_send("the bus table", 3, m, 160);
++	{
++		bool r = hfi_send("the bus table", 3, m, 160);
++
++		printf("adreno: %u: polaris: legacy message 3 (BW, 160 words): %s\n", step, r ? "accepted" : "refused");
++		ok = ok && r;
++	}
+ 	for (unsigned i = 0; i < 160; i++) {
+ 		m[i] = 0;
+ 	}
+-	ok = ok && hfi_send("the loopback test", 5, m, 1);
++	{
++		bool r = hfi_send("the loopback test", 5, m, 1);
++
++		printf("adreno: %u: polaris: legacy message 5 (TEST): %s\n", step, r ? "accepted" : "refused");
++		ok = ok && r;
++	}
+ 	legacy_sent = ok;
+ 	return ok;
+ }
