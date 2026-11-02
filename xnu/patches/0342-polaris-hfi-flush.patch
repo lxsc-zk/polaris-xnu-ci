@@ -1,0 +1,28 @@
+Subject: [PATCH] polaris: flush the HFI table and queues around every message
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3434,6 +3434,9 @@
+ 	volatile uint32_t *data = (volatile uint32_t *)((vm_offset_t)hfi + HFI_QUEUE_AT(which));
+ 	bool answered = false;
+ 
++	/* polaris: what the GMU wrote is in DRAM, not in this CPU's cache */
++	to_memory((vm_offset_t)hfi, 0x4000u);
++
+ 	while (queue->read != queue->write) {
+ 		uint32_t message[8] = { 0 }, at = queue->read % HFI_QUEUE_WORDS, words = data[at] >> 8 & 0xff;
+ 
+@@ -3542,7 +3545,12 @@
+ 		at = (at + 1) % HFI_QUEUE_WORDS;
+ 	}
+ 	queue->write = at;
+-	settle();
++	/*
++	 * polaris: the queue is cached memory; the GMU reads DRAM. The working sender flushes
++	 * the whole buffer here (polaris_pt_clean); a bare dsb leaves the message in this CPU's
++	 * cache and the firmware sees zeros.
++	 */
++	to_memory((vm_offset_t)hfi, 0x4000u);
+ 	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
+ 	for (int i = 0; i < 10000 && !answered; i++) {
+ 		sleep_us(100);
