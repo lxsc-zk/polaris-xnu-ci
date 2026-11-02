@@ -1,0 +1,22 @@
+Subject: [PATCH] polaris: advance the read pointer by the message's own word count
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3480,7 +3480,16 @@
+ 			}
+ 			at = (at + 1) % HFI_QUEUE_WORDS;
+ 		}
+-		queue->read = (at + 3) / 4 * 4 % HFI_QUEUE_WORDS;
++		/*
++		 * polaris: read + the word count from this message's header, as polaris_hfi_xfer
++		 * does (h1[0x28/4] = (ri + n) & 1023). Using the write cursor of queue 0 left the
++		 * pointer behind, and a stale answer blocked every later message.
++		 */
++		{
++			uint32_t consumed = (message[0] >> 8) & 0xffu;
++
++			queue->read = ((uint32_t)queue->read + (consumed ? consumed : 1u)) % HFI_QUEUE_WORDS;
++		}
+ 		if (((message[0] >> 16) & 0xf) == HFI_ANSWER || ((message[0] >> 16) & 0xf) == 1) {
+ 			/* polaris: accept the type this firmware uses (2) and the one assumed before (1) */
+ 			/*
