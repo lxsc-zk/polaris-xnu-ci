@@ -1,0 +1,48 @@
+Subject: [PATCH] polaris: restore the HFI layout that worked on this board
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1770,7 +1770,7 @@
+  * 0x60006000 with the queues packed after it, while still telling the GMU 0x60009000 and
+  * mapping a single page: the firmware then walked into unmapped IOVAs and the CPU hung on
+  * the next GMU register read. */
+-#define GMU_LOG_ADDRESS         0x60100000u       /* the vendor's second kernel slot: 0x60000000 + 1 MB */
++#define GMU_LOG_ADDRESS         0x60004000u       /* GPU-HFI-2026-10-30.md: the working run's CP_MSG=0x60004003 */
+ #define GMU_LOG_SIZE            0x4000u
+ #define GMU_HFI_ADDRESS         0x60000000u       /* kgsl_gmu.c: hfi_mem is entry 0 off noncached_kstart */
+ #define GMU_HFI_SIZE            0x4000u         /* the table's page and the three queues' */
+@@ -2131,9 +2131,16 @@
+ 		for (uint32_t i = 0; i < 3; i++) {
+ 			uint32_t b = 0x18u + i * 48u;
+ 
+-			t[(b + 0x00u) / 4u] = hfi_phys + 168u + i * (4096u + 16u);
+-			t[(b + 0x04u) / 4u] = (uint32_t)queue_id[i] | ((uint32_t)queue_prio[i] << 8);
+-			t[(b + 0x08u) / 4u] = 1;
++			/*
++			 * GPU-HFI-2026-10-30.md: the working run has status at +0x00, start_addr at
++			 * +0x04, type at +0x08 -- the order this driver's struct hfi_queue always
++			 * had. 0311 copied the shifted offsets from polaris_hfi_build_va(), which
++			 * that document identifies as the broken variant, and the firmware then
++			 * read "type" as the queue address and "1" as the type.
++			 */
++			t[(b + 0x00u) / 4u] = 1;
++			t[(b + 0x04u) / 4u] = hfi_phys + 168u + i * (4096u + 16u);
++			t[(b + 0x08u) / 4u] = (uint32_t)queue_id[i] | ((uint32_t)queue_prio[i] << 8);
+ 			t[(b + 0x0cu) / 4u] = 1024;
+ 			t[(b + 0x18u) / 4u] = 1;
+ 			t[(b + 0x1cu) / 4u] = 1;
+@@ -2592,6 +2599,14 @@
+ 	printf("adreno: %u: polaris: latches cleared, masks set: gmu_mask=%#x ao_mask=%#x queued=%#x\n",
+ 	    step, rd(gmu.base + GMU_GMU2HOST_INTR_MASK), rd(gmu.base + GMU_AO_HOST_INTR_MASK),
+ 	    rd(gmu.base + GMU_HFI_CTRL_STATUS));
++	/*
++	 * polaris: the GMU reads the table from DRAM, so it has to be there -- the working run
++	 * flushed it (dc civac) before HFI_CTRL_INIT; the driver never did.
++	 */
++	to_memory(gmu_hfi.memory, GMU_HFI_SIZE);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("adreno: %u: polaris: HFI table flushed to memory (q0=%#x q1=%#x q2=%#x)\n", step,
++	    rd(gmu_hfi.memory + 0x1c), rd(gmu_hfi.memory + 0x4c), rd(gmu_hfi.memory + 0x7c));
+ 	put(&gmu, "hfi_ctrl_init", GMU_HFI_CTRL_INIT, 1);
+ 	/*
+ 	 * polaris: whatever the firmware does next may wedge the GMU block, and the read that
