@@ -1,0 +1,25 @@
+Subject: [PATCH] polaris: collect the SMMU fault right after HFI_CTRL_INIT
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2532,6 +2532,20 @@
+ 	    step, rd(gmu.base + GMU_GMU2HOST_INTR_MASK), rd(gmu.base + GMU_AO_HOST_INTR_MASK),
+ 	    rd(gmu.base + GMU_HFI_CTRL_STATUS));
+ 	put(&gmu, "hfi_ctrl_init", GMU_HFI_CTRL_INIT, 1);
++	/*
++	 * polaris: whatever the firmware does next may wedge the GMU block, and the read that
++	 * would tell us so is the one that hangs (the board hard-resets there). The SMMU's
++	 * fault registers are still readable from here, so collect them now -- the bring-up
++	 * built the same experiment for this exact moment.
++	 */
++	for (int i = 0; i < 3; i++) {
++		for (volatile uint32_t spin = 0; spin < 20000; spin++) {
++			__asm__ __volatile__("nop");
++		}
++		printf("adreno: %u: polaris: after HFI_CTRL_INIT #%d: gmu2host=%#x ", step, i,
++		    rd(gmu.base + GMU_GMU2HOST_INTR_INFO));
++		(void)space_faulted(&gmu_space);
++	}
+ 	if (!wait_for(&gmu, GMU_HFI_CTRL_STATUS, 1, 1, 500)) {
+ 		get(&gmu, "hfi_ctrl_status", GMU_HFI_CTRL_STATUS);
+ 		get(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT);
