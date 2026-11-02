@@ -1,0 +1,111 @@
+Subject: [PATCH] polaris: transplant the working GMU address space whole, and recheck the SMRs
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1789,7 +1789,9 @@
+ #define GMU_FIRMWARE_NEEDS_KEPT 7
+ 
+ static struct gpu_space gmu_space = { .name = "the GMU", .context = 2 };
+-static void gmu_cb1_mirror(void);      /* polaris: defined below, called from the GMU's space step */   /* polaris: the GMU answers on context 2 */
++static void gmu_cb1_mirror(void);      /* polaris: defined below, called from the GMU's space step */
++static bool pol_gmu_space_verbatim(void);
++static void pol_smmu_slots(const char *when);   /* polaris: the GMU answers on context 2 */
+ static struct gpu_block gmu_blocks[12], gmu_log, gmu_hfi;
+ static unsigned gmu_block_count;
+ static const uint8_t *gmu_firmware;
+@@ -1916,12 +1918,10 @@
+ 		return false;
+ 	}
+ 	/*
+-	 * polaris: the streams have to be in place *now*, before the CM3 is released -- by the
+-	 * time HFI runs, every SMR reads 0 again (0321's readout), i.e. starting the firmware
+-	 * clears them. The bring-up configures its streams in its own step 12 for the same
+-	 * reason.
++	 * polaris: take the working implementation's address space whole, and do it before the
++	 * CM3 is released (the streams read 0 again by the time HFI runs).
+ 	 */
+-	gmu_cb1_mirror();
++	(void)pol_gmu_space_verbatim();
+ 	/*
+ 	 * polaris: and the second stream the firmware uses. The SMMU dump this port recorded
+ 	 * (STATUS.md, the CMG experiment) had both SMR[3]=0x80000004 and SMR[4]=0x80000005
+@@ -2356,6 +2356,8 @@
+ 		return false;
+ 	}
+ 	printf("adreno: %u: THE GMU'S FIRMWARE RUNS\n", step);
++	/* polaris: did starting the firmware touch the stream-match slots? */
++	pol_smmu_slots("right after 0xbabeface");
+ 	return true;
+ }
+ 
+@@ -2737,6 +2739,70 @@
+ 	return ok;
+ }
+ 
++/*
++ * polaris: the GMU's address space taken whole from mi8flow.inc, the image that painted the
++ * screen -- one 13-page block at 0x60000000, its own space in context bank 1 with SID 5
++ * through match 1, SID 4 through slot 2, and ASID 1 in TTBR0. The HFI table and the log are
++ * pointers into that block at the offsets the working run uses (0x9000 and 0x5000).
++ */
++static struct gpu_space pol_space = { .name = "the GMU (verbatim)", .context = 1 };
++static struct gpu_block pol_buf;
++
++/* What the SMMU's stream-match slots hold, whenever this is asked. */
++static void
++pol_smmu_slots(const char *when)
++{
++	printf("adreno: %u: polaris: SMR slots %s: 0=0x%x/0x%x 1=0x%x/0x%x 2=0x%x/0x%x 3=0x%x/0x%x 4=0x%x/0x%x\n",
++	    step, when,
++	    rd(smmu.base + SMMU_S2CR(0)), rd(smmu.base + SMMU_SMR(0)),
++	    rd(smmu.base + SMMU_S2CR(1)), rd(smmu.base + SMMU_SMR(1)),
++	    rd(smmu.base + SMMU_S2CR(2)), rd(smmu.base + SMMU_SMR(2)),
++	    rd(smmu.base + SMMU_S2CR(3)), rd(smmu.base + SMMU_SMR(3)),
++	    rd(smmu.base + SMMU_S2CR(4)), rd(smmu.base + SMMU_SMR(4)));
++}
++
++static bool
++pol_gmu_space_verbatim(void)
++{
++	uint32_t context;
++	uint64_t root;
++
++	if (!smmu_layout()) {
++		return false;
++	}
++	if (!block_new(&pol_space, &pol_buf, 0x60000000u, 13u * 4096u, PTE_GMU)) {
++		printf("adreno: %u: polaris: cannot lay the GMU's 13 pages\n", step);
++		return false;
++	}
++	if (!space_on(&pol_space, 1, 5)) {              /* SID 5 -> context bank 1 */
++		printf("adreno: %u: polaris: the GMU's own space will not come on\n", step);
++		return false;
++	}
++	context = smmu_context(&pol_space);
++	root = ((uint64_t)rd(smmu.base + context + SMMU_CB_TTBR0 + 4u) << 32) |
++	    rd(smmu.base + context + SMMU_CB_TTBR0);
++	root = (root & ~(0xffffull << 48)) | ((uint64_t)1 << 48);       /* ASID 1, as the bring-up */
++	wr(smmu.base + context + SMMU_CB_TTBR0, (uint32_t)root);
++	wr(smmu.base + context + SMMU_CB_TTBR0 + 4u, (uint32_t)(root >> 32));
++	wr(smmu.base + SMMU_S2CR(2), 1);                                /* SID 4 -> the same bank */
++	wr(smmu.base + SMMU_SMR(2), 0x80000004u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	pol_smmu_slots("after the space is built");
++
++	/* the HFI table and the log are views into the block the bring-up's way */
++	hfi = (volatile struct hfi_table *)(pol_buf.memory + 0x9000u);
++	gmu_hfi.memory = pol_buf.memory + 0x9000u;
++	gmu_hfi.address = 0x60009000u;
++	gmu_hfi.size = 0x4000u;
++	gmu_log.memory = pol_buf.memory + 0x5000u;
++	gmu_log.address = 0x60005000u;
++	gmu_log.size = 0x4000u;
++	printf("adreno: %u: polaris: the GMU's space: 13 pages at 0x60000000, table %#llx, log %#llx, root %#llx asid 1\n",
++	    step, (unsigned long long)gmu_hfi.memory, (unsigned long long)gmu_log.memory,
++	    (unsigned long long)root);
++	return true;
++}
++
+ static bool
+ step_gmu_queues(void)
+ {
