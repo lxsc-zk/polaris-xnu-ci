@@ -1,0 +1,25 @@
+Subject: [PATCH] polaris: give the firmware 50 ms after 0xbabeface before HFI_CTRL_INIT
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2859,6 +2859,20 @@
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	printf("adreno: %u: polaris: HFI table flushed to memory (q0=%#x q1=%#x q2=%#x)\n", step,
+ 	    rd(gmu_hfi.memory + 0x1c), rd(gmu_hfi.memory + 0x4c), rd(gmu_hfi.memory + 0x7c));
++	/*
++	 * polaris: the working image spends hundreds of milliseconds between 0xbabeface and
++	 * this write -- its rail block polls 0x14340 up to 200000 times -- while here the rail
++	 * is often already in the state that poll wants, so the write can land microseconds
++	 * after the firmware reported. Give it the same quiet 50 ms, and look at the fence on
++	 * both sides in case the block is being held.
++	 */
++	printf("adreno: %u: polaris: before the wait: fence=%#x ao_fence=%#x hfi_status=%#x fw_init=%#x\n", step,
++	    rd(gmu.base + GMU_AHB_FENCE_STATUS), rd(gmu.base + 0x24c4cu), rd(gmu.base + GMU_HFI_CTRL_STATUS),
++	    rd(gmu.base + GMU_CM3_FW_INIT_RESULT));
++	sleep_ms(50);
++	printf("adreno: %u: polaris: after 50 ms: fence=%#x ao_fence=%#x hfi_status=%#x fw_init=%#x\n", step,
++	    rd(gmu.base + GMU_AHB_FENCE_STATUS), rd(gmu.base + 0x24c4cu), rd(gmu.base + GMU_HFI_CTRL_STATUS),
++	    rd(gmu.base + GMU_CM3_FW_INIT_RESULT));
+ 	put(&gmu, "hfi_ctrl_init", GMU_HFI_CTRL_INIT, 1);
+ 	/*
+ 	 * polaris: whatever the firmware does next may wedge the GMU block, and the read that
