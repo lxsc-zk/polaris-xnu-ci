@@ -1,0 +1,58 @@
+Subject: [PATCH] polaris: one summary line for the legacy five
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2735,12 +2735,14 @@
+ 	static uint32_t m[160];
+ 	static const uint32_t gk[8] = { 0u, 257000u, 342000u, 414000u, 520000u, 596000u, 675000u, 710000u };
+ 	bool ok;
++	uint32_t mask = 0;
+ 
+ 	for (unsigned i = 0; i < 160; i++) {
+ 		m[i] = 0;
+ 	}
+ 	m[1] = 0; m[2] = 0x60001000u; m[3] = 0x4000u; m[4] = 1u;
+ 	ok = hfi_send("the legacy INIT", 0, m, 5);
++	mask |= (ok ? 1u : 0u) << 0;
+ 	printf("adreno: %u: polaris: legacy message 0 (INIT): %s\n", step, ok ? "accepted" : "refused");
+ 	for (unsigned i = 0; i < 160; i++) {
+ 		m[i] = 0;
+@@ -2748,6 +2750,7 @@
+ 	m[1] = (1u << 28) | (1u << 19) | (1u << 17);
+ 	{
+ 		bool r = hfi_send("the firmware version", 1, m, 2);
++		mask |= (r ? 1u : 0u) << 1;
+ 
+ 		printf("adreno: %u: polaris: legacy message 1 (FW_VERSION): %s\n", step, r ? "accepted" : "refused");
+ 		ok = ok && r;
+@@ -2762,6 +2765,7 @@
+ 	}
+ 	{
+ 		bool r = hfi_send("the speed table", 4, m, 43);
++		mask |= (r ? 1u : 0u) << 4;
+ 
+ 		printf("adreno: %u: polaris: legacy message 4 (PERF, 43 words): %s\n", step, r ? "accepted" : "refused");
+ 		ok = ok && r;
+@@ -2777,6 +2781,7 @@
+ 	m[32] = 0x40000000u; m[33] = 0x40000000u; m[34] = 0x40000000u;
+ 	{
+ 		bool r = hfi_send("the bus table", 3, m, 160);
++		mask |= (r ? 1u : 0u) << 3;
+ 
+ 		printf("adreno: %u: polaris: legacy message 3 (BW, 160 words): %s\n", step, r ? "accepted" : "refused");
+ 		ok = ok && r;
+@@ -2786,10 +2791,14 @@
+ 	}
+ 	{
+ 		bool r = hfi_send("the loopback test", 5, m, 1);
++		mask |= (r ? 1u : 0u) << 5;
+ 
+ 		printf("adreno: %u: polaris: legacy message 5 (TEST): %s\n", step, r ? "accepted" : "refused");
+ 		ok = ok && r;
+ 	}
++	printf("adreno: %u: polaris: legacy five: INIT=%u FW_VERSION=%u PERF=%u BW=%u TEST=%u -> %s\n", step,
++	    (mask >> 0) & 1u, (mask >> 1) & 1u, (mask >> 4) & 1u, (mask >> 3) & 1u, (mask >> 5) & 1u,
++	    ok ? "all accepted" : "SOMETHING REFUSED");
+ 	legacy_sent = ok;
+ 	return ok;
+ }
