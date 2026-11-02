@@ -1,0 +1,31 @@
+Subject: [PATCH] polaris: restore the working image's CX clk-dis-wait and AHB fence value
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -579,6 +579,12 @@
+ 		printf("adreno: %u: the switch is under hardware control: not ours to operate\n", step);
+ 		return false;
+ 	}
++	/*
++	 * polaris: mi8flow.inc sets the switch's clock-off wait before it clears collapse
++	 * ((v & ~(0xf << 12)) | (8 << 12)); this driver only ever cleared SW_COLLAPSE.
++	 */
++	put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, (gdscr & ~(0xfu << 12)) | (8u << 12));
++	gdscr = rd(gpucc.base + GPUCC_CX_GDSCR);
+ 	put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, gdscr & ~GDSC_SW_COLLAPSE);
+ 	for (int i = 0; i < 500 && !cx_is_on(); i++) {
+ 		sleep_us(100);
+@@ -2213,10 +2219,9 @@
+ 	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
+ 	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, hfi_bypass ? hfi_phys : GMU_HFI_ADDRESS);
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+-	/* polaris: 0x80a008a0 is the value the MI8 flow and the vendor tree use; 0x802800a0 came
+-	 * from the M8 flow. If the fence range points at a word the GMU cannot use, it never
+-	 * releases the fence and the CPU's next access to this block never completes. */
+-	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 0x80a008a0u);
++	/* polaris: 0x802800a0 is the value in mi8flow.inc, the image that painted the screen;
++	 * 0316 switched it to 0x80a008a0 while chasing the HFI stall, which changed nothing. */
++	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 0x802800a0u);
+ 	put(&gmu, "cm3_cfg", GMU_CM3_CFG, 0x4052);
+ 	/* polaris: the GBIF window does not answer here (see step 6): skipping this write */
+ 	if (0) {
