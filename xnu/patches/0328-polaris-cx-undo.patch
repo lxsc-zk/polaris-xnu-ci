@@ -1,0 +1,37 @@
+Subject: [PATCH] polaris: undo 0326's CX change; judge CX by 0x1540 bit 31
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -539,7 +539,15 @@
+ static bool
+ cx_is_on(void)
+ {
+-	return (rd(gpucc.base + GPUCC_CX_GDSCR) | rd(gpucc.base + GPUCC_CX_HW_CTRL)) & GDSC_POWER_ON;
++	/*
++	 * polaris: mi8flow.inc judges CX by bit 31 of 0x1540 (CX_HW_CTRL); ORing it with the
++	 * switch's own bit 31 lets the two disagree, and acting on that disagreement disturbs
++	 * a switch that is already on.
++	 */
++	if (rd(gpucc.base + GPUCC_CX_HW_CTRL) & GDSC_POWER_ON) {
++		return GDSC_POWER_ON;
++	}
++	return rd(gpucc.base + GPUCC_CX_GDSCR) & GDSC_POWER_ON;
+ }
+ 
+ static void stale_stop(void);
+@@ -580,11 +588,11 @@
+ 		return false;
+ 	}
+ 	/*
+-	 * polaris: mi8flow.inc sets the switch's clock-off wait before it clears collapse
+-	 * ((v & ~(0xf << 12)) | (8 << 12)); this driver only ever cleared SW_COLLAPSE.
++	 * polaris: 0326 wrote clk-dis-wait = 8 first, the way mi8flow.inc does -- but that
++	 * image only touches 0x106c at all when its bit 31 is clear, and here writing it
++	 * left CX off for twenty seconds (the skip run never got past step 4). Back to the
++	 * single collapse-clearing write.
+ 	 */
+-	put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, (gdscr & ~(0xfu << 12)) | (8u << 12));
+-	gdscr = rd(gpucc.base + GPUCC_CX_GDSCR);
+ 	put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, gdscr & ~GDSC_SW_COLLAPSE);
+ 	for (int i = 0; i < 500 && !cx_is_on(); i++) {
+ 		sleep_us(100);
