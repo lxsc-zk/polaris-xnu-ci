@@ -1,0 +1,35 @@
+Subject: [PATCH] polaris: the firmware's answer type is 2, not 1
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3406,7 +3406,12 @@
+ #define HFI_GX_BW_PERF_VOTE     30
+ #define HFI_PREPARE_SLUMBER     33
+ #define HFI_ERROR               100
+-#define HFI_ANSWER              1               /* in bits 19:16 */
++/*
++ * polaris: the answer header this firmware sends is 0x0002047e -- id 126 (F2H_MSG_ACK),
++ * 4 words, type 2 (GPU-HFI-2026-10-30.md records the same four words). It was 1 here, so a
++ * perfectly good answer fell through to "the GMU says" and the message was called refused.
++ */
++#define HFI_ANSWER              2               /* in bits 19:16 */
+ #define HFI_NO_INDEX            0xff
+ 
+ struct hfi_perf_table {
+@@ -3447,9 +3452,14 @@
+ 			at = (at + 1) % HFI_QUEUE_WORDS;
+ 		}
+ 		queue->read = (at + 3) / 4 * 4 % HFI_QUEUE_WORDS;
+-		if ((message[0] >> 16 & 0xf) == HFI_ANSWER && message[1] >> 20 == number) {
++		if (((message[0] >> 16) & 0xf) == HFI_ANSWER || ((message[0] >> 16) & 0xf) == 1) {
++			/* polaris: accept the type this firmware uses (2) and the one assumed before (1) */
+ 			*verdict = message[2];
+-			answered = true;
++			answered = message[1] >> 20 == number;
++			if (!answered) {
++				printf("adreno: %u: HFI: an answer for message %u, not %u: %#x %#x %#x\n", step,
++				    message[1] >> 20, number, message[0], message[1], message[2]);
++			}
+ 		} else {
+ 			message[7] = 0;
+ 			if ((message[0] & 0xff) == HFI_ERROR) {         /* vendor's adreno_a6xx_receive_err_req */
