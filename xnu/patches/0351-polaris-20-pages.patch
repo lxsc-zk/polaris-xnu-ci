@@ -1,0 +1,32 @@
+Subject: [PATCH] polaris: map 20 pages so the INIT debug buffer is reachable
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3138,7 +3138,8 @@
+ static uint64_t pol_pt_root[512] __attribute__((aligned(4096)));
+ static uint64_t pol_pt_l2[512] __attribute__((aligned(4096)));
+ static uint64_t pol_pt_l3[512] __attribute__((aligned(4096)));
+-static uint8_t pol_scratch[13 * 4096] __attribute__((aligned(4096)));
++/* 20 pages: the table takes 0x9000 and H2F_MSG_INIT's debug buffer is at 0x60001000 */
++static uint8_t pol_scratch[20 * 4096] __attribute__((aligned(4096)));
+ 
+ static void
+ pol_pt_clean(vm_offset_t start, vm_size_t size)
+@@ -3256,7 +3257,7 @@
+ 			t[(b + 0x20u) / 4u] = 1;
+ 		}
+ 	}
+-	for (uint32_t k = 0; k < 13u; k++) {
++	for (uint32_t k = 0; k < 20u; k++) {
+ 		pol_pt_map(0x60000000ull + (uint64_t)k * 0x1000ull,
+ 		    kvtophys((vm_offset_t)(pol_scratch + k * 4096u)));
+ 	}
+@@ -3279,7 +3280,7 @@
+ 	gmu_log.memory = (vm_offset_t)(pol_scratch + 0x5000u);
+ 	gmu_log.address = 0x60005000u;
+ 	gmu_log.size = 0x4000u;
+-	printf("adreno: %u: polaris: the GMU's space is the bring-up's: 13 pages at 0x60000000, "
++	printf("adreno: %u: polaris: the GMU's space is the bring-up's: 20 pages at 0x60000000, "
+ 	    "table %#llx, log %#llx\n", step, (unsigned long long)gmu_hfi.memory,
+ 	    (unsigned long long)gmu_log.memory);
+ 	/*
