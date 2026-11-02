@@ -1,0 +1,49 @@
+Subject: [PATCH] polaris: accept the one-behind answer, and flush the last one
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2808,6 +2808,22 @@
+ 		printf("adreno: %u: polaris: legacy message 5 (TEST): %s\n", step, r ? "accepted" : "refused");
+ 		ok = ok && r;
+ 	}
++	{
++		uint32_t verdict = 0xffffffffu, info = 0;
++
++		/* polaris: the last answer only appears when one more doorbell rings */
++		wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
++		for (int k = 0; k < 1000; k++) {
++			sleep_us(100);
++			info = rd(gmu.base + GMU_GMU2HOST_INTR_INFO);
++			if (info & 1u) {
++				wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 1);
++				(void)hfi_receive(1, hfi_number, &verdict);
++				break;
++			}
++		}
++		printf("adreno: %u: polaris: drained the last answer: info=%#x verdict=%#x\n", step, info, verdict);
++	}
+ 	printf("adreno: %u: polaris: legacy five: INIT=%u FW_VERSION=%u PERF=%u BW=%u TEST=%u -> %s\n", step,
+ 	    (mask >> 0) & 1u, (mask >> 1) & 1u, (mask >> 4) & 1u, (mask >> 3) & 1u, (mask >> 5) & 1u,
+ 	    ok ? "all accepted" : "SOMETHING REFUSED");
+@@ -3459,11 +3475,16 @@
+ 			 * need not be ours -- take the first answer of the right type, as
+ 			 * polaris_hfi_xfer() does, and keep the sequence for the log only.
+ 			 */
+-			*verdict = message[2];
+-			answered = true;
+-			if ((message[1] >> 20) != number) {
+-				printf("adreno: %u: HFI: answer carries sequence %u while %u was sent (taken anyway)\n",
+-				    step, message[1] >> 20, number);
++			{
++				uint32_t seq = message[1] >> 20;
++
++				if (seq == number || seq + 1u == number) {
++					*verdict = message[2];
++					answered = true;
++					if (seq != number) {
++						printf("adreno: %u: HFI: took the answer to %u for %u\n", step, seq, number);
++					}
++				}
+ 			}
+ 		} else {
+ 			message[7] = 0;
