@@ -1,0 +1,87 @@
+Subject: [PATCH] polaris: raise the GX rail before HFI_CTRL_INIT, as the working image does
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2037,6 +2037,7 @@
+ /* the always-on sequencer's side of the GMU's RPMh channel (defined with step 16's macros) */
+ static void gmu_pdc_rsc_setup(void);
+ static bool gmu_rail_vote(void);
++static bool gmu_rail_before_hfi(void);
+ 
+ #define GMU_ICACHE_CONFIG       GMU_WORD(0x4c00)
+ #define GMU_DCACHE_CONFIG       GMU_WORD(0x4c01)
+@@ -2555,12 +2556,74 @@
+ 	    rd(gmu.base + 0x23000u + 0x010u), rd(pdc_win + 4u * 0x1140u));
+ }
+ 
++/*
++ * polaris: the GX rail, before the firmware is allowed to ask for it.
++ *
++ * Verbatim from mi8flow.inc (the image that painted the screen): the rail block runs
++ * *ahead* of HFI_CTRL_INIT -- 0x8fe0/0x8fe4/0x8fe8 with the indices taken from gfx.lvl and
++ * mx.lvl (first level at 64 mV or above), then OOB 22/30, then SPTPRAC 0x778000, then
++ * 0x14340 & 0x38 == 0x28. The driver had this after HFI, and HFI is exactly where the bus
++ * stalls; without a rail the firmware's first power request has nothing to answer it.
++ */
++static bool
++gmu_rail_before_hfi(void)
++{
++	uint16_t gfx[16], mx[16];
++	unsigned gfx_levels = 0, mx_levels = 0;
++	uint32_t gx = 0, mxidx = 0;
++
++	if (!rpmh_resource("gfx.lvl", gfx, &gfx_levels) || !rpmh_resource("mx.lvl", mx, &mx_levels)) {
++		printf("adreno: %u: polaris: the rail lists are missing; not raising GX\n", step);
++		return false;
++	}
++	for (unsigned i = 0; i < gfx_levels && i < 16; i++) {
++		if (gfx[i] >= 64u) {
++			gx = i;
++			break;
++		}
++	}
++	for (unsigned i = 0; i < mx_levels && i < 16; i++) {
++		if (mx[i] >= 64u) {
++			mxidx = i;
++			break;
++		}
++	}
++	printf("adreno: %u: polaris: rail: gfx.lvl %u levels -> %u, mx.lvl %u levels -> %u\n", step, gfx_levels, gx,
++	    mx_levels, mxidx);
++	wr(gmu.base + 0x8fe0u, 0);
++	wr(gmu.base + 0x8fe4u, gx);
++	wr(gmu.base + 0x8fe8u, mxidx);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1u << 22);
++	for (int i = 0; i < 200000; i++) {
++		if (rd(gmu.base + GMU_GMU2HOST_INTR_INFO) & (1u << 30)) {
++			break;
++		}
++	}
++	wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 1u << 30);
++	wr(gmu.base + 0x204u, 0x778000u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (int i = 0; i < 200000; i++) {
++		if ((rd(gmu.base + 0x14340u) & 0x38u) == 0x28u) {
++			break;
++		}
++	}
++	printf("adreno: %u: polaris: rail done: gx_pwr=%#x power_state=%#x sptprac=%#x gx_gdscr=%#x\n", step,
++	    rd(gmu.base + 0x8fe4u), rd(gmu.base + 0x143b0u), rd(gmu.base + 0x14340u),
++	    rd(gpucc.base + 0x100cu));
++	return (rd(gmu.base + 0x14340u) & 0x38u) == 0x28u;
++}
++
+ static bool
+ step_gmu_queues(void)
+ {
+ 	if (!cx_ready() || !gmu_runs) {
+ 		return false;
+ 	}
++	/*
++	 * polaris: the rail first -- the working image brings GX up before HFI, not after.
++	 */
++	(void)gmu_rail_before_hfi();
+ 	announce("enable the GPU's part of the always-on sequencer and give the GMU's RPMh channel its program");
+ 	if (skip_rsc_table) {
+ 		printf("adreno: %u: adreno_skip_rsc=1: leaving the RSCC/PDC sequence table alone here too\n", step);
