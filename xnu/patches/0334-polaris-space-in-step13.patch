@@ -1,0 +1,33 @@
+Subject: [PATCH] polaris: step 13 builds the GMU's address space the working way
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1846,6 +1846,16 @@
+ 		return false;
+ 	}
+ 	/*
++	 * polaris: the address space this GMU needs is the working bring-up's, not this
++	 * driver's -- same register values, different tables, and the difference is fatal:
++	 * with the driver's own tables the write to HFI_CTRL_INIT never returns (0332), with
++	 * the bring-up's it does (0333). Build it here and let steps 14 and 15 use it.
++	 */
++	if (pol_gmu_space_verbatim()) {
++		return true;
++	}
++	printf("adreno: %u: polaris: the bring-up's address space did not take; falling back to this driver's\n", step);
++	/*
+ 	 * polaris (Adreno 630) is a "legacy" GMU as Linux calls it: its firmware is
+ 	 * not the block format below (that is a650 and later) but one raw image that
+ 	 * goes into the GMU's ITCM whole -- a6xx_gmu_fw_load():
+@@ -3153,6 +3163,11 @@
+ {
+ 	static const uint32_t ids[3] = { 0u, 4u, 5u };
+ 
++	need(&smmu);
++	if (!smmu.base) {
++		printf("adreno: %u: polaris: the SMMU does not map\n", step);
++		return false;
++	}
+ 	/* 13 pages of the working bring-up's scratch, the table at 0x9000 as there */
+ 	for (unsigned k = 0; k < sizeof(pol_scratch); k++) {
+ 		pol_scratch[k] = 0;
