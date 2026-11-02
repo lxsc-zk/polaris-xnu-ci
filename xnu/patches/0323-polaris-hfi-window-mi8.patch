@@ -1,0 +1,16 @@
+Subject: [PATCH] polaris: table at 0x60009000, log at 0x60005000 -- the working window
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1770,9 +1770,9 @@
+  * 0x60006000 with the queues packed after it, while still telling the GMU 0x60009000 and
+  * mapping a single page: the firmware then walked into unmapped IOVAs and the CPU hung on
+  * the next GMU register read. */
+-#define GMU_LOG_ADDRESS         0x60004000u       /* GPU-HFI-2026-10-30.md: the working run's CP_MSG=0x60004003 */
++#define GMU_LOG_ADDRESS         0x60005000u       /* mi8flow.inc: CP_MSG = 0x60005003 */
+ #define GMU_LOG_SIZE            0x4000u
+-#define GMU_HFI_ADDRESS         0x60000000u       /* kgsl_gmu.c: hfi_mem is entry 0 off noncached_kstart */
++#define GMU_HFI_ADDRESS         0x60009000u       /* mi8flow.inc: the table the working run used */
+ #define GMU_HFI_SIZE            0x4000u         /* the table's page and the three queues' */
+ /* the address HFI_SFR_ADDR points the firmware at (0x06030100) -- it writes there during
+  * HFI bring-up, and nothing used to map that window: an untranslated access resets the SoC. */
