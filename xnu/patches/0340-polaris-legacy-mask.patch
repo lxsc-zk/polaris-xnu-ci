@@ -1,0 +1,31 @@
+Subject: [PATCH] polaris: print the legacy verdicts at the point step 17 decides
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1825,6 +1825,7 @@
+ static bool mi8_flow;           /* adreno_mi8=1: steps 15-16 exactly as mi8flow.inc runs them */
+ static bool verbatim;           /* adreno_verbatim=1: the whole sequence from mi8flow.inc, nothing else */
+ static bool legacy_sent;        /* the legacy five have gone out: no a6xx/Linux messages after them */
++static uint32_t legacy_mask;    /* which of the five the GMU took */
+ static uint32_t hfi_phys, log_phys;
+ static uint32_t gmu_bypass_slot[2] = { 0, 1 };
+ static void gmu_post_mortem(void);
+@@ -2800,6 +2801,7 @@
+ 	    (mask >> 0) & 1u, (mask >> 1) & 1u, (mask >> 4) & 1u, (mask >> 3) & 1u, (mask >> 5) & 1u,
+ 	    ok ? "all accepted" : "SOMETHING REFUSED");
+ 	legacy_sent = ok;
++	legacy_mask = mask;
+ 	return ok;
+ }
+ 
+@@ -3661,6 +3663,10 @@
+ 	printf("adreno: %u: the speed wanted: %u MHz\n", step, core_khz / 1000);
+ 	announce("send the GMU its tables (speeds and supply levels, bus votes), \"start\", and the speed wanted; "
+ 	    "from here on it casts votes in RPMh by itself");
++	printf("adreno: %u: polaris: legacy mask %#x (INIT=%u FW_VERSION=%u PERF=%u BW=%u TEST=%u) %s\n",
++	    step, legacy_mask, (legacy_mask >> 0) & 1u, (legacy_mask >> 1) & 1u, (legacy_mask >> 4) & 1u,
++	    (legacy_mask >> 3) & 1u, (legacy_mask >> 5) & 1u,
++	    legacy_sent ? "all accepted" : "SOMETHING REFUSED");
+ 	if (legacy_sent) {
+ 		printf("adreno: %u: polaris: the legacy five already went out; not sending the a6xx set too\n", step);
+ 		goto gpu_set;
