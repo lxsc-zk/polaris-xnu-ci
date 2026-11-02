@@ -1,0 +1,29 @@
+Subject: [PATCH] polaris: write the firmware into ITCM from pol_gmu_space_verbatim()
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3219,6 +3219,24 @@
+ 	printf("adreno: %u: polaris: the GMU's space is the bring-up's: 13 pages at 0x60000000, "
+ 	    "table %#llx, log %#llx\n", step, (unsigned long long)gmu_hfi.memory,
+ 	    (unsigned long long)gmu_log.memory);
++	/*
++	 * polaris: the firmware goes into ITCM here as well. Step 13 returns early after this
++	 * call, which used to leave step 14 thinking the image was already in place.
++	 */
++	if (gmu_firmware != NULL && gmu_firmware_size >= 0x8000u) {
++		uint32_t bad = 0;
++
++		for (uint32_t k = 0; k < 8192u; k++) {
++			wr(gmu.base + 0x3000u + k * 4u, *(const uint32_t *)(gmu_firmware + k * 4u));
++		}
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		for (uint32_t k = 0; k < 8192u; k++) {
++			if (rd(gmu.base + 0x3000u + k * 4u) != *(const uint32_t *)(gmu_firmware + k * 4u)) {
++				bad++;
++			}
++		}
++		printf("adreno: %u: polaris: firmware into ITCM: %u words read back wrong\n", step, bad);
++	}
+ 	return true;
+ }
+ 
