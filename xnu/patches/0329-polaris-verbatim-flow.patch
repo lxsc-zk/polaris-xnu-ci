@@ -1,0 +1,232 @@
+Subject: [PATCH] polaris: adreno_verbatim=1 runs mi8flow.inc's sequence inside this driver
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1805,6 +1805,7 @@
+ static struct gpu_space gmu_space = { .name = "the GMU", .context = 2 };
+ static void gmu_cb1_mirror(void);      /* polaris: defined below, called from the GMU's space step */
+ static bool pol_gmu_space_verbatim(void);
++static bool pol_verbatim_flow(void);
+ static void pol_smmu_slots(const char *when);   /* polaris: the GMU answers on context 2 */
+ static struct gpu_block gmu_blocks[12], gmu_log, gmu_hfi;
+ static unsigned gmu_block_count;
+@@ -1822,6 +1823,7 @@
+ static bool skip_hfi_start;
+ static bool hfi_bypass;         /* adreno_hfi_bypass=1: the firmware sees physical addresses */
+ static bool mi8_flow;           /* adreno_mi8=1: steps 15-16 exactly as mi8flow.inc runs them */
++static bool verbatim;           /* adreno_verbatim=1: the whole sequence from mi8flow.inc, nothing else */
+ static uint32_t hfi_phys, log_phys;
+ static uint32_t gmu_bypass_slot[2] = { 0, 1 };
+ static void gmu_post_mortem(void);
+@@ -2781,6 +2783,188 @@
+ 	    rd(smmu.base + SMMU_S2CR(4)), rd(smmu.base + SMMU_SMR(4)));
+ }
+ 
++
++/* ---- polaris: mi8flow.inc's sequence, whole, for adreno_verbatim=1 ----------------------- */
++
++static const struct { uint8_t reg; uint16_t w; uint32_t val; } pol_tbl[] = {
++	{ 0, 0x0004, 1u << 24 }, { 0, 0x000b, 1 }, { 0, 0x000e, 0 }, { 0, 0x000d, 0 },
++	{ 0, 0x0010, 0 }, { 0, 0x000f, 0 }, { 0, 0x0012, 0x80000000u }, { 0, 0x0011, 0 },
++	{ 0, 0x0100, 0 }, { 0, 0x0008, 0x4520 }, { 0, 0x0009, 0x4510 }, { 0, 0x000a, 0x4514 },
++	{ 0, 0x0180, 0xa7a506a0u }, { 0, 0x0181, 0xa1e6a6e7u }, { 0, 0x0182, 0xa2e081e1u },
++	{ 0, 0x0183, 0xe9a982e2u }, { 0, 0x0184, 0x0020e8a8u },
++	{ 2, 0x0000, 0xfebea1e1u }, { 2, 0x0001, 0xa5a4a3a2u }, { 2, 0x0002, 0x8382a6e0u },
++	{ 2, 0x0003, 0xbce3e284u }, { 2, 0x0004, 0x002081fcu },
++	{ 1, 0x1573, 7 }, { 1, 0x1574, 0 }, { 1, 0x1572, 0 },
++	{ 1, 0x1575, 0x10108 }, { 1, 0x1576, 0x30010 }, { 1, 0x1577, 1 },
++	{ 1, 0x1579, 0x10108 }, { 1, 0x157a, 0x30000 }, { 1, 0x157b, 0 },
++	{ 1, 0x157d, 0x10108 }, { 1, 0x157e, 0x30080 }, { 1, 0x157f, 0 },
++	{ 1, 0x15d7, 7 }, { 1, 0x15d8, 0 }, { 1, 0x15d6, 0 },
++	{ 1, 0x15d9, 0x10108 }, { 1, 0x15da, 0x30010 }, { 1, 0x15db, 2 },
++	{ 1, 0x15dd, 0x10108 }, { 1, 0x15de, 0x30000 }, { 1, 0x15df, 3 },
++	{ 1, 0x15e1, 0x10108 }, { 1, 0x15e2, 0x30080 }, { 1, 0x15e3, 3 },
++	{ 1, 0x1148, 0 }, { 1, 0x1140, 0x80000001u },
++};
++
++static const struct { uint16_t w; uint32_t val; } pol_boot[] = {
++	{ 0x51cc, 0x1 }, { 0x501c, 0x0 }, { 0x5001, 0x2 }, { 0x5185, 0x60009000u },
++	{ 0x5184, 0x1 }, { 0x9311, 0x802800a0u }, { 0x502d, 0x4052 }, { 0x5182, 0x06030100u },
++	{ 0x5100, 0x60005003u }, { 0x4c0f, 0x1 }, { 0x4c00, 0x1 }, { 0x4c01, 0x1 },
++	{ 0x50c0, 0x9c40400u }, { 0x50e8, 0xf11u }, { 0x5101, 0x0 },
++};
++
++static bool
++pol_verbatim_flow(void)
++{
++	vm_offset_t pd = ml_io_map(0x0b280000u, 0x10000u);
++	vm_offset_t sq = ml_io_map(0x0b480000u, 0x10000u);
++	uint32_t v;
++	int i;
++
++	if (!pd || !sq || !smmu_layout()) {
++		printf("POLARIS VERBATIM: map failed\n");
++		return false;
++	}
++	/* step 3: is the GPU's register bus running? */
++	v = rd(gcc.base + 0x71004u);
++	printf("POLARIS VERBATIM: gcc_gpu_cfg_ahb=%#x %s\n", v, (v & (1u << 31)) ? "OFF" : "on");
++	if (v & (1u << 31)) {
++		return false;
++	}
++	/* step 4: CX, judged by 0x1540 bit 31 */
++	v = rd(gpucc.base + 0x106cu);
++	if (!(v & (1u << 31))) {
++		wr(gpucc.base + 0x106cu, (v & ~(0xfu << 12)) | (8u << 12));
++		v = rd(gpucc.base + 0x106cu);
++		wr(gpucc.base + 0x106cu, v & ~1u);
++		for (i = 0; i < 2000; i++) {
++			if (rd(gpucc.base + 0x1540u) & (1u << 31)) {
++				break;
++			}
++		}
++	}
++	printf("POLARIS VERBATIM: CX after GDSCR=%#x hwctl=%#x %s\n", rd(gpucc.base + 0x106cu),
++	    rd(gpucc.base + 0x1540u), (rd(gpucc.base + 0x1540u) & (1u << 31)) ? "ON" : "OFF");
++	/* step 5: clocks, exactly as the working image */
++	wr(gcc.base + 0x71004u, rd(gcc.base + 0x71004u) | 1u);
++	wr(gcc.base + 0x7100cu, rd(gcc.base + 0x7100cu) | 1u);
++	wr(gcc.base + 0x71018u, rd(gcc.base + 0x71018u) | 1u);
++	v = rd(gpucc.base + 0x1124u);
++	wr(gpucc.base + 0x1124u, v & ~((7u << 8) | 0x1fu));
++	wr(gpucc.base + 0x1120u, rd(gpucc.base + 0x1120u) | (1u << 0) | (1u << 1));
++	for (i = 0; i < 1000; i++) {
++		v = rd(gpucc.base + 0x1120u);
++		if (!(v & (1u << 0)) && !(v & (1u << 31))) {
++			break;
++		}
++	}
++	wr(gpucc.base + 0x1098u, (rd(gpucc.base + 0x1098u) & ~((0xfu << 8) | (0xfu << 4))) | (0xfu << 8) | (0xfu << 4));
++	wr(gpucc.base + 0x109cu, rd(gpucc.base + 0x109cu) | 1u);
++	wr(gpucc.base + 0x1098u, rd(gpucc.base + 0x1098u) | 1u);
++	printf("POLARIS VERBATIM: clocks rcg=%#x gmu=%#x cxo=%#x\n", rd(gpucc.base + 0x1120u),
++	    rd(gpucc.base + 0x1098u), rd(gpucc.base + 0x109cu));
++	/* step 9: TCM test, needs the processor held in reset */
++	if (rd(gmu.base + 0x14000u) != 1u) {
++		printf("POLARIS VERBATIM: SYSRESET is not 1, not touching the TCM\n");
++		return false;
++	}
++	{
++		static const uint32_t pat[2] = { 0xa5a5a5a5u, 0x5a5a5a5au };
++		static const uint32_t off[2] = { 0x3000u, 0x7000u };
++		uint32_t m, bad = 0;
++
++		for (m = 0; m < 2u; m++) {
++			uint32_t o0 = rd(gmu.base + off[m]), o1 = rd(gmu.base + off[m] + 4u);
++
++			wr(gmu.base + off[m], pat[0]);
++			wr(gmu.base + off[m] + 4u, pat[1]);
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			bad += rd(gmu.base + off[m]) != pat[0];
++			bad += rd(gmu.base + off[m] + 4u) != pat[1];
++			wr(gmu.base + off[m], o0);
++			wr(gmu.base + off[m] + 4u, o1);
++		}
++		printf("POLARIS VERBATIM: TCM test %s (%u bad words)\n", bad ? "DIFFERENT" : "same", bad);
++	}
++	/* step 10: the firmware into ITCM, read back */
++	if (gmu_firmware == NULL || gmu_firmware_size < 0x8000u) {
++		printf("POLARIS VERBATIM: no firmware\n");
++		return false;
++	}
++	for (i = 0; i < 8192; i++) {
++		wr(gmu.base + 0x3000u + (uint32_t)i * 4u, *(const uint32_t *)(gmu_firmware + i * 4u));
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	{
++		uint32_t bad = 0;
++
++		for (i = 0; i < 8192; i++) {
++			if (rd(gmu.base + 0x3000u + (uint32_t)i * 4u) != *(const uint32_t *)(gmu_firmware + i * 4u)) {
++				bad++;
++			}
++		}
++		printf("POLARIS VERBATIM: firmware 32768 bytes, %u words read back wrong\n", bad);
++		if (bad) {
++			return false;
++		}
++	}
++	/* step 11: the RSC/PDC table */
++	for (unsigned k = 0; k < sizeof(pol_tbl) / sizeof(pol_tbl[0]); k++) {
++		vm_offset_t base = pol_tbl[k].reg == 0 ? gmu.base + 0x23000u :
++		    (pol_tbl[k].reg == 1 ? pd : sq);
++
++		wr(base + 4u * pol_tbl[k].w, pol_tbl[k].val);
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("POLARIS VERBATIM: rsc/pdc table written (%u entries); status0=%#x pdc enable=%#x\n",
++	    (uint32_t)(sizeof(pol_tbl) / sizeof(pol_tbl[0])), rd(gmu.base + 0x23000u + 0x10u),
++	    rd(pd + 4u * 0x1140u));
++	/* step 12: the GMU's own 13-page space */
++	if (!pol_gmu_space_verbatim()) {
++		return false;
++	}
++	/* step 14: the 15 boot registers, in the working image's order */
++	for (unsigned k = 0; k < sizeof(pol_boot) / sizeof(pol_boot[0]); k++) {
++		if (pol_boot[k].w == 0x50e8u) {
++			wr(gmu.base + 4u * pol_boot[k].w, rd(gmu.base + 4u * pol_boot[k].w) | pol_boot[k].val);
++		} else {
++			wr(gmu.base + 4u * pol_boot[k].w, pol_boot[k].val);
++		}
++	}
++	wr(gmu.base + 0x14008u, 0u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("POLARIS VERBATIM: boot regs qtbl=%#x info=%#x sfr=%#x fence=%#x cpmsg=%#x\n",
++	    rd(gmu.base + 0x14614u), rd(gmu.base + 0x14610u), rd(gmu.base + 0x14608u),
++	    rd(gmu.base + 0x24c44u), rd(gmu.base + 0x14400u));
++	/* step 15: release the reset and wait for the magic */
++	wr(gmu.base + 0x14000u, 1u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	wr(gmu.base + 0x14000u, 0u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	v = 0;
++	for (i = 0; i < 300000; i++) {
++		v = rd(gmu.base + 0x14070u);
++		if (v == 0xbabefaceu) {
++			break;
++		}
++	}
++	printf("POLARIS VERBATIM: FW_INIT_RESULT=%#x polls=%d %s\n", v, i, (v == 0xbabefaceu) ? "GMU-BOOTED" : "FAIL");
++	if (v != 0xbabefaceu) {
++		return false;
++	}
++	/* and the HFI start */
++	wr(gmu.base + 0x14618u, 1u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	v = 0;
++	for (i = 0; i < 500; i++) {
++		v = rd(gmu.base + 0x14600u);
++		if (v & 1u) {
++			break;
++		}
++	}
++	printf("POLARIS VERBATIM: HFI_CTRL_STATUS=%#x %s\n", v, (v & 1u) ? "started" : "NOT started");
++	return (v & 1u) != 0;
++}
++
+ static bool
+ pol_gmu_space_verbatim(void)
+ {
+@@ -4652,6 +4836,10 @@
+ 		if (PE_parse_boot_argn("adreno_mi8", &skip, sizeof(skip))) {
+ 			mi8_flow = skip != 0;
+ 		}
++		skip = 0;
++		if (PE_parse_boot_argn("adreno_verbatim", &skip, sizeof(skip))) {
++			verbatim = skip != 0;
++		}
+ 		if (mi8_flow) {
+ 			printf("adreno: adreno_mi8=1: steps 15-16 follow mi8flow.inc only\n");
+ 		}
+@@ -4681,6 +4869,11 @@
+ 		last_step = STEPS;
+ 	}
+ 	PE_parse_boot_argn("adreno_watch", &watch_seconds, sizeof(watch_seconds));
++	if (verbatim) {
++		printf("adreno: adreno_verbatim=1: running mi8flow.inc's sequence instead of the steps\n");
++		(void)pol_verbatim_flow();
++		return;
++	}
+ 	for (newest_step = last_step; newest_step > 0 && (skip_steps & 1u << newest_step); newest_step--) {
+ 	}
+ 
