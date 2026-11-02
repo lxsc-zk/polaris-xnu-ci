@@ -1,0 +1,208 @@
+Subject: [PATCH] polaris: the working bring-up's SMMU path, copied whole
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3032,45 +3032,178 @@
+ 	return true;
+ }
+ 
++
++/* ---- polaris: the working bring-up's SMMU path, copied whole ------------------------------------------- */
++
++#define POL_PTE_TABLE   3ull
++#define POL_PTE_PAGE    3ull
++#define POL_PTE_GMU     ((2ull << 8) | (1ull << 10) | (1ull << 11))
++#define POL_PTE_ADDR    0x0000fffffffff000ull
++#define POL_CBAR_STAGE_1    ((1u << 16) | (3u << 8) | (0xfu << 12))
++#define POL_TCR_39      (25u | (1u << 8) | (1u << 10) | (3u << 12) | (1u << 23))
++#define POL_TCR2        (1u | (1u << 4) | (7u << 15))
++#define POL_MAIR0       0xf404ff44u
++#define POL_SCTLR_ON    ((1u << 0) | (1u << 1) | (1u << 2) | (1u << 5) | (1u << 12))
++#define POL_FSR_ALL     0xc00001feu
++#define POL_CB_SCTLR    0x00u
++#define POL_CB_TCR2     0x10u
++#define POL_CB_TTBR0    0x20u
++#define POL_CB_TTBR1    0x28u
++#define POL_CB_TCR      0x30u
++#define POL_CB_MAIR0    0x38u
++#define POL_CB_MAIR1    0x3cu
++#define POL_CB_FSR      0x58u
++#define POL_CB_TLBIASID 0x610u
++#define POL_CB_TLBSYNC  0x7f0u
++#define POL_CB_TLBSTATUS 0x7f4u
++#define POL_CBAR(n)     (0x1000u + 4u * (n))
++#define POL_CBA2R(n)    (0x1800u + 4u * (n))
++#define POL_SMR(n)      (0x800u + 4u * (n))
++#define POL_S2CR(n)     (0xc00u + 4u * (n))
++
++static uint32_t pol_tcr_ps = 0u;
++static uint64_t pol_pt_root[512] __attribute__((aligned(4096)));
++static uint64_t pol_pt_l2[512] __attribute__((aligned(4096)));
++static uint64_t pol_pt_l3[512] __attribute__((aligned(4096)));
++static uint8_t pol_scratch[13 * 4096] __attribute__((aligned(4096)));
++
++static void
++pol_pt_clean(vm_offset_t start, vm_size_t size)
++{
++	vm_offset_t line;
++
++	for (line = start & ~(vm_offset_t)63; line < start + size; line += 64) {
++		__asm__ __volatile__("dc civac, %0" : : "r"(line));
++	}
++	__asm__ __volatile__("dsb sy" ::: "memory");
++}
++
++static void
++pol_pt_map(uint64_t va, uint64_t pa)
++{
++	pol_pt_root[(va >> 30) & 0x1ffu] = kvtophys((vm_offset_t)pol_pt_l2) | POL_PTE_TABLE;
++	pol_pt_l2[(va >> 21) & 0x1ffu] = kvtophys((vm_offset_t)pol_pt_l3) | POL_PTE_TABLE;
++	pol_pt_l3[(va >> 12) & 0x1ffu] = (pa & POL_PTE_ADDR) | POL_PTE_GMU | POL_PTE_PAGE;
++}
++
++static int
++pol_smmu_space_on(vm_offset_t s, uint32_t ctx, uint32_t match, uint32_t stream)
++{
++	uint32_t idr1, idr0, page, pages, cb, i;
++	uint64_t root;
++
++	idr0 = rd(s + 0x020u);
++	idr1 = rd(s + 0x024u);
++	page = (idr1 >> 31) ? 0x10000u : 0x1000u;
++	pages = 2u << ((idr1 >> 28) & 7u);
++	cb = (pages + ctx) * page;
++	printf("POLARIS SPACE: idr0=%#x idr1=%#x page=%#x pages=%u cb=%#x\\n", idr0, idr1, page, pages, cb);
++	pol_pt_clean((vm_offset_t)pol_pt_root, sizeof(pol_pt_root));
++	pol_pt_clean((vm_offset_t)pol_pt_l2, sizeof(pol_pt_l2));
++	pol_pt_clean((vm_offset_t)pol_pt_l3, sizeof(pol_pt_l3));
++	root = kvtophys((vm_offset_t)pol_pt_root) | ((uint64_t)ctx << 48);
++
++	wr(s + cb + POL_CB_SCTLR, 0);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	wr(s + POL_CBA2R(ctx), 1u);
++	wr(s + POL_CBAR(ctx), POL_CBAR_STAGE_1);
++	wr(s + cb + POL_CB_TCR2, POL_TCR2);
++	wr(s + cb + POL_CB_TCR, POL_TCR_39 | (pol_tcr_ps << 16));
++	wr(s + cb + POL_CB_TTBR0, (uint32_t)root);
++	wr(s + cb + POL_CB_TTBR0 + 4u, (uint32_t)(root >> 32));
++	wr(s + cb + POL_CB_TTBR1, 0u);
++	wr(s + cb + POL_CB_TTBR1 + 4u, 0u);
++	wr(s + cb + POL_CB_MAIR0, POL_MAIR0);
++	wr(s + cb + POL_CB_MAIR1, 0u);
++	wr(s + cb + POL_CB_FSR, POL_FSR_ALL);
++	wr(s + cb + POL_CB_TLBIASID, ctx);
++	wr(s + cb + POL_CB_TLBSYNC, 1u);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (i = 0; i < 100000u; i++) {
++		if (!(rd(s + cb + POL_CB_TLBSTATUS) & 1u)) {
++			break;
++		}
++	}
++	wr(s + cb + POL_CB_SCTLR, POL_SCTLR_ON);
++	wr(s + POL_S2CR(match), ctx);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	{
++		static const uint32_t masks[] = { 0x000u, 0x100u, 0x3ffu, 0x400u };
++		uint32_t m, want;
++
++		for (m = 0; m < sizeof(masks) / sizeof(masks[0]); m++) {
++			want = 0x80000000u | (masks[m] << 16) | stream;
++			wr(s + POL_SMR(match), want);
++			__asm__ __volatile__("dsb sy" ::: "memory");
++			printf("POLARIS SPACE: smr mask %#x wrote %#x read %#x %s\\n", masks[m], want,
++			    rd(s + POL_SMR(match)), (rd(s + POL_SMR(match)) == want) ? "OK" : "REJECTED");
++			if (rd(s + POL_SMR(match)) == want) {
++				break;
++			}
++		}
++	}
++	printf("POLARIS SPACE: cb%u sctlr=%#x ttbr0=%#x/%#x tcr=%#x tcr2=%#x cbar=%#x cba2r=%#x\\n", ctx,
++	    rd(s + cb + POL_CB_SCTLR), rd(s + cb + POL_CB_TTBR0 + 4u), rd(s + cb + POL_CB_TTBR0),
++	    rd(s + cb + POL_CB_TCR), rd(s + cb + POL_CB_TCR2), rd(s + POL_CBAR(ctx)), rd(s + POL_CBA2R(ctx)));
++	return (rd(s + POL_SMR(match)) & 0x80000000u) ? 0 : -1;
++}
++
+ static bool
+ pol_gmu_space_verbatim(void)
+ {
+-	uint32_t context;
+-	uint64_t root;
++	static const uint32_t ids[3] = { 0u, 4u, 5u };
+ 
+-	if (!smmu_layout()) {
+-		return false;
++	/* 13 pages of the working bring-up's scratch, the table at 0x9000 as there */
++	for (unsigned k = 0; k < sizeof(pol_scratch); k++) {
++		pol_scratch[k] = 0;
+ 	}
+-	if (!block_new(&pol_space, &pol_buf, 0x60000000u, 13u * 4096u, PTE_GMU)) {
+-		printf("adreno: %u: polaris: cannot lay the GMU's 13 pages\n", step);
+-		return false;
++	{
++		volatile uint32_t *t = (volatile uint32_t *)(pol_scratch + 0x9000u);
++
++		t[0] = 0;
++		t[1] = 168;
++		t[2] = 6;
++		t[3] = 12;
++		t[4] = 3;
++		t[5] = 3;
++		for (unsigned q = 0; q < 3u; q++) {
++			uint32_t b = 0x18u + q * 48u;
++
++			t[(b + 0x00u) / 4u] = 1;
++			t[(b + 0x04u) / 4u] = 0x60009000u + 0x1000u * (q + 1u);
++			t[(b + 0x08u) / 4u] = (10u << 8) | ids[q];
++			t[(b + 0x0cu) / 4u] = 1024;
++			t[(b + 0x18u) / 4u] = 1;
++			t[(b + 0x1cu) / 4u] = 1;
++			t[(b + 0x20u) / 4u] = 1;
++		}
++	}
++	for (uint32_t k = 0; k < 13u; k++) {
++		pol_pt_map(0x60000000ull + (uint64_t)k * 0x1000ull,
++		    kvtophys((vm_offset_t)(pol_scratch + k * 4096u)));
+ 	}
+-	if (!space_on(&pol_space, 1, 5)) {              /* SID 5 -> context bank 1 */
+-		printf("adreno: %u: polaris: the GMU's own space will not come on\n", step);
++	pol_pt_clean((vm_offset_t)pol_scratch, sizeof(pol_scratch));
++	pol_tcr_ps = 1u;
++	if (pol_smmu_space_on(smmu.base, 1u, 1u, 5u) != 0) {
++		printf("adreno: %u: polaris: the GMU's own space did not take\n", step);
+ 		return false;
+ 	}
+-	context = smmu_context(&pol_space);
+-	root = ((uint64_t)rd(smmu.base + context + SMMU_CB_TTBR0 + 4u) << 32) |
+-	    rd(smmu.base + context + SMMU_CB_TTBR0);
+-	root = (root & ~(0xffffull << 48)) | ((uint64_t)1 << 48);       /* ASID 1, as the bring-up */
+-	wr(smmu.base + context + SMMU_CB_TTBR0, (uint32_t)root);
+-	wr(smmu.base + context + SMMU_CB_TTBR0 + 4u, (uint32_t)(root >> 32));
+-	wr(smmu.base + SMMU_S2CR(2), 1);                                /* SID 4 -> the same bank */
+-	wr(smmu.base + SMMU_SMR(2), 0x80000004u);
++	wr(smmu.base + POL_S2CR(2), 1u);
++	wr(smmu.base + POL_SMR(2), 0x80000004u);
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+-	pol_smmu_slots("after the space is built");
++	printf("adreno: %u: polaris: SID 4 slot: smr=%#x s2cr=%#x\n", step,
++	    rd(smmu.base + POL_SMR(2)), rd(smmu.base + POL_S2CR(2)));
+ 
+-	/* the HFI table and the log are views into the block the bring-up's way */
+-	hfi = (volatile struct hfi_table *)(pol_buf.memory + 0x9000u);
+-	gmu_hfi.memory = pol_buf.memory + 0x9000u;
++	hfi = (volatile struct hfi_table *)(pol_scratch + 0x9000u);
++	gmu_hfi.memory = (vm_offset_t)(pol_scratch + 0x9000u);
+ 	gmu_hfi.address = 0x60009000u;
+ 	gmu_hfi.size = 0x4000u;
+-	gmu_log.memory = pol_buf.memory + 0x5000u;
++	gmu_log.memory = (vm_offset_t)(pol_scratch + 0x5000u);
+ 	gmu_log.address = 0x60005000u;
+ 	gmu_log.size = 0x4000u;
+-	printf("adreno: %u: polaris: the GMU's space: 13 pages at 0x60000000, table %#llx, log %#llx, root %#llx asid 1\n",
+-	    step, (unsigned long long)gmu_hfi.memory, (unsigned long long)gmu_log.memory,
+-	    (unsigned long long)root);
++	printf("adreno: %u: polaris: the GMU's space is the bring-up's: 13 pages at 0x60000000, "
++	    "table %#llx, log %#llx\n", step, (unsigned long long)gmu_hfi.memory,
++	    (unsigned long long)gmu_log.memory);
+ 	return true;
+ }
+ 
