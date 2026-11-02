@@ -1,0 +1,32 @@
+Subject: [PATCH] polaris: probe the AHB fence before HFI_CTRL_INIT, and try the vendor's range
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2195,7 +2195,10 @@
+ 	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
+ 	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, hfi_bypass ? hfi_phys : GMU_HFI_ADDRESS);
+ 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
+-	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 0x802800a0u);
++	/* polaris: 0x80a008a0 is the value the MI8 flow and the vendor tree use; 0x802800a0 came
++	 * from the M8 flow. If the fence range points at a word the GMU cannot use, it never
++	 * releases the fence and the CPU's next access to this block never completes. */
++	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 0x80a008a0u);
+ 	put(&gmu, "cm3_cfg", GMU_CM3_CFG, 0x4052);
+ 	/* polaris: the GBIF window does not answer here (see step 6): skipping this write */
+ 	if (0) {
+@@ -2572,6 +2575,15 @@
+ 	printf("adreno: %u: before HFI_CTRL_INIT: hfi_ctrl_status=%#x gmu2host=%#x rsc_status0=%#x\n",
+ 	    step, rd(gmu.base + GMU_HFI_CTRL_STATUS), rd(gmu.base + GMU_GMU2HOST_INTR_INFO),
+ 	    rd(gmu.base + 0x23000u + 0x010u));
++	/*
++	 * polaris: the fence is the prime suspect for a write that simply never completes --
++	 * a transaction to a block held behind a fence the GMU does not release. Print what the
++	 * block and the power controller say right before the write that dies.
++	 */
++	printf("adreno: %u: polaris: fence: range0=%#x range1=%#x status=%#x ao_ctrl=%#x ao_status=%#x cbcr=%#x\n", step,
++	    rd(gmu.base + GMU_AHB_FENCE_RANGE_0), rd(gmu.base + GMU_AHB_FENCE_RANGE_0 + 4),
++	    rd(gmu.base + GMU_AHB_FENCE_STATUS), rd(gmu.base + GMU_AO_AHB_FENCE_CTRL),
++	    rd(gmu.base + 0x24c4cu), rd(gpucc.base + GPUCC_CX_GMU_CBCR));
+ 	wr(gmu.base + GMU_GMU2HOST_INTR_INFO, 0xffffffffu);
+ 	wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 0xffffffffu);
+ 	wr(gmu.base + GMU_GMU2HOST_INTR_MASK, 0xff7ffffeu);
