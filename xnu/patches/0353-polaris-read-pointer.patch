@@ -20,3 +20,4 @@ Subject: [PATCH] polaris: advance the read pointer by the message's own word cou
  		if (((message[0] >> 16) & 0xf) == HFI_ANSWER || ((message[0] >> 16) & 0xf) == 1) {
  			/* polaris: accept the type this firmware uses (2) and the one assumed before (1) */
  			/*
+n
