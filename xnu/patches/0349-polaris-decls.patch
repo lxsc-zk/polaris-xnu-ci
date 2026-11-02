@@ -1,0 +1,21 @@
+Subject: [PATCH] polaris: declare the HFI sequence and receive function up front
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1827,6 +1827,8 @@
+ static bool legacy_sent;        /* the legacy five have gone out: no a6xx/Linux messages after them */
+ static uint32_t legacy_mask;    /* which of the five the GMU took */
+ static bool hfi_table_set;      /* the working space built the table: step 15 must not rebuild it */
++static uint32_t hfi_number;     /* the sequence of the last message sent (hfi_send below) */
++static bool hfi_receive(unsigned which, uint32_t number, uint32_t *verdict);
+ static uint32_t hfi_phys, log_phys;
+ static uint32_t gmu_bypass_slot[2] = { 0, 1 };
+ static void gmu_post_mortem(void);
+@@ -3444,7 +3446,6 @@
+ 	uint32_t cnoc_address[6], cnoc_data[2][6], ddr_address[8], ddr_data[16][8];
+ };
+ 
+-static uint32_t hfi_number;
+ static bool post_mortem_done;
+ 
+ /* Everything waiting in a queue of the GMU's; true if the answer to the message numbered `number` was among it. */
