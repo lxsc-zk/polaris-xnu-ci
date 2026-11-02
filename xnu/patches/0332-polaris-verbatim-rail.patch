@@ -1,0 +1,78 @@
+Subject: [PATCH] polaris: the verbatim flow's missing rail, messages and GPU_SET
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2960,6 +2960,51 @@
+ 	if (v != 0xbabefaceu) {
+ 		return false;
+ 	}
++	/*
++	 * step 16 of the working image: the rail, before the firmware is asked for anything.
++	 * 0x8fe0 = 0, 0x8fe4 = the gfx index, 0x8fe8 = the mx index, OOB 22/30, SPTPRAC
++	 * 0x778000, then 0x14340 & 0x38 == 0x28.
++	 */
++	{
++		uint16_t gfx[16], mx[16];
++		unsigned gfx_levels = 0, mx_levels = 0;
++		uint32_t gx = 0, mxidx = 0;
++
++		if (rpmh_resource("gfx.lvl", gfx, &gfx_levels) && rpmh_resource("mx.lvl", mx, &mx_levels)) {
++			for (unsigned k = 0; k < gfx_levels && k < 16; k++) {
++				if (gfx[k] >= 64u) {
++					gx = k;
++					break;
++				}
++			}
++			for (unsigned k = 0; k < mx_levels && k < 16; k++) {
++				if (mx[k] >= 64u) {
++					mxidx = k;
++					break;
++				}
++			}
++		}
++		wr(gmu.base + 0x8fe0u, 0);
++		wr(gmu.base + 0x8fe4u, gx);
++		wr(gmu.base + 0x8fe8u, mxidx);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1u << 22);
++		for (i = 0; i < 200000; i++) {
++			if (rd(gmu.base + GMU_GMU2HOST_INTR_INFO) & (1u << 30)) {
++				break;
++			}
++		}
++		wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 1u << 30);
++		wr(gmu.base + 0x204u, 0x778000u);
++		__asm__ __volatile__("dsb sy" ::: "memory");
++		for (i = 0; i < 200000; i++) {
++			if ((rd(gmu.base + 0x14340u) & 0x38u) == 0x28u) {
++				break;
++			}
++		}
++		printf("POLARIS VERBATIM: rail gx=%u mx=%u power_state=%#x sptprac=%#x gx_gdscr=%#x\n",
++		    gx, mxidx, rd(gmu.base + 0x143b0u), rd(gmu.base + 0x14340u), rd(gpucc.base + 0x100cu));
++	}
+ 	/* and the HFI start */
+ 	wr(gmu.base + 0x14618u, 1u);
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+@@ -2971,7 +3016,20 @@
+ 		}
+ 	}
+ 	printf("POLARIS VERBATIM: HFI_CTRL_STATUS=%#x %s\n", v, (v & 1u) ? "started" : "NOT started");
+-	return (v & 1u) != 0;
++	if (!(v & 1u)) {
++		return false;
++	}
++	/* the five legacy messages, then GPU_SET */
++	(void)gmu_hfi_legacy_messages();
++	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1u << 16);
++	for (i = 0; i < 200000; i++) {
++		if (rd(gmu.base + GMU_GMU2HOST_INTR_INFO) & (1u << 24)) {
++			break;
++		}
++	}
++	wr(gmu.base + GMU_GMU2HOST_INTR_CLR, (1u << 24) | (1u << 30));
++	printf("POLARIS VERBATIM: GPU_SET info=%#x done\n", rd(gmu.base + GMU_GMU2HOST_INTR_INFO));
++	return true;
+ }
+ 
+ static bool
