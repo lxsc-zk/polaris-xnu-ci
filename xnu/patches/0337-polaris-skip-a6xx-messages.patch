@@ -1,0 +1,39 @@
+Subject: [PATCH] polaris: with the legacy five sent, step 17 goes straight to GPU_SET
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1824,6 +1824,7 @@
+ static bool hfi_bypass;         /* adreno_hfi_bypass=1: the firmware sees physical addresses */
+ static bool mi8_flow;           /* adreno_mi8=1: steps 15-16 exactly as mi8flow.inc runs them */
+ static bool verbatim;           /* adreno_verbatim=1: the whole sequence from mi8flow.inc, nothing else */
++static bool legacy_sent;        /* the legacy five have gone out: no a6xx/Linux messages after them */
+ static uint32_t hfi_phys, log_phys;
+ static uint32_t gmu_bypass_slot[2] = { 0, 1 };
+ static void gmu_post_mortem(void);
+@@ -2768,6 +2769,7 @@
+ 		m[i] = 0;
+ 	}
+ 	ok = ok && hfi_send("the loopback test", 5, m, 1);
++	legacy_sent = ok;
+ 	return ok;
+ }
+ 
+@@ -3629,6 +3631,10 @@
+ 	printf("adreno: %u: the speed wanted: %u MHz\n", step, core_khz / 1000);
+ 	announce("send the GMU its tables (speeds and supply levels, bus votes), \"start\", and the speed wanted; "
+ 	    "from here on it casts votes in RPMh by itself");
++	if (legacy_sent) {
++		printf("adreno: %u: polaris: the legacy five already went out; not sending the a6xx set too\n", step);
++		goto gpu_set;
++	}
+ 	if (!hfi_send("the table of speeds", HFI_PERF_TABLE, &perf.header, sizeof(perf) / 4) ||
+ 	    !hfi_send("the table of bus votes", HFI_BW_TABLE, &bw.header, sizeof(bw) / 4) ||
+ 	    !hfi_send("\"start the core firmware\"", HFI_CORE_FW_START, core_start, 2) ||
+@@ -3636,6 +3642,7 @@
+ 		return false;
+ 	}
+ 
++gpu_set:
+ 	announce("ask the GMU to power the 3D core and keep it powered");
+ 	get(&gmu, "sptprac_pwr_clk_status", GMU_SPTPRAC_PWR_CLK_STATUS);
+ 	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
