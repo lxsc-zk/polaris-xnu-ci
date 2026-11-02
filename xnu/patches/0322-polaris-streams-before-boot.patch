@@ -1,0 +1,45 @@
+Subject: [PATCH] polaris: configure the GMU's SMMU streams before the CM3 is released
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1788,7 +1788,8 @@
+ #define GMU_FIRMWARE_NEEDS      1               /* types of blocks without data: memory wanted, value = bytes */
+ #define GMU_FIRMWARE_NEEDS_KEPT 7
+ 
+-static struct gpu_space gmu_space = { .name = "the GMU", .context = 2 };   /* polaris: the GMU answers on context 2 */
++static struct gpu_space gmu_space = { .name = "the GMU", .context = 2 };
++static void gmu_cb1_mirror(void);      /* polaris: defined below, called from the GMU's space step */   /* polaris: the GMU answers on context 2 */
+ static struct gpu_block gmu_blocks[12], gmu_log, gmu_hfi;
+ static unsigned gmu_block_count;
+ static const uint8_t *gmu_firmware;
+@@ -1915,6 +1916,13 @@
+ 		return false;
+ 	}
+ 	/*
++	 * polaris: the streams have to be in place *now*, before the CM3 is released -- by the
++	 * time HFI runs, every SMR reads 0 again (0321's readout), i.e. starting the firmware
++	 * clears them. The bring-up configures its streams in its own step 12 for the same
++	 * reason.
++	 */
++	gmu_cb1_mirror();
++	/*
+ 	 * polaris: and the second stream the firmware uses. The SMMU dump this port recorded
+ 	 * (STATUS.md, the CMG experiment) had both SMR[3]=0x80000004 and SMR[4]=0x80000005
+ 	 * live with S2CR 0x300, while this driver routes only stream 5 -- so the table read
+@@ -2038,7 +2046,6 @@
+ static void gmu_pdc_rsc_setup(void);
+ static bool gmu_rail_vote(void);
+ static bool gmu_rail_before_hfi(void);
+-static void gmu_cb1_mirror(void);
+ static bool gmu_hfi_legacy_messages(void);
+ static bool hfi_send(const char *what, uint32_t id, uint32_t *message, uint32_t words);
+ 
+@@ -2740,8 +2747,6 @@
+ 	 * polaris: the rail first -- the working image brings GX up before HFI, not after.
+ 	 */
+ 	(void)gmu_rail_before_hfi();
+-	/* polaris: and the streams into context bank 1, with the ASID the working image uses */
+-	gmu_cb1_mirror();
+ 	announce("enable the GPU's part of the always-on sequencer and give the GMU's RPMh channel its program");
+ 	if (skip_rsc_table) {
+ 		printf("adreno: %u: adreno_skip_rsc=1: leaving the RSCC/PDC sequence table alone here too\n", step);
