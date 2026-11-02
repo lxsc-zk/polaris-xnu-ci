@@ -1,0 +1,41 @@
+Subject: [PATCH] polaris: dump the queue headers to read the layout off
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1827,6 +1827,17 @@
+ static bool legacy_sent;        /* the legacy five have gone out: no a6xx/Linux messages after them */
+ static uint32_t legacy_mask;    /* which of the five the GMU took */
+ static bool hfi_table_set;      /* the working space built the table: step 15 must not rebuild it */
++/* polaris: twelve words of a queue header, to read the layout off rather than assume it. */
++static void
++pol_dump_queue(const char *what, volatile uint32_t *q)
++{
++	printf("adreno: %u: QUEUE %s:", step, what);
++	for (int i = 0; i < 12; i++) {
++		printf(" %#x", q[i]);
++	}
++	printf("\n");
++}
++
+ static uint32_t hfi_number;     /* the sequence of the last message sent (hfi_send below) */
+ static bool hfi_receive(unsigned which, uint32_t number, uint32_t *verdict);
+ static uint32_t hfi_phys, log_phys;
+@@ -3502,6 +3513,9 @@
+ 			break;
+ 		}
+ 	}
++	if (which == 1) {
++		pol_dump_queue("1 after the read", (volatile uint32_t *)hfi + 18);
++	}
+ 	return answered;
+ }
+ 
+@@ -3580,6 +3594,8 @@
+ 	snprintf(last_write, sizeof(last_write), "step %u sent the GMU message %u (%s)", step, id, what);
+ 	hold(true);
+ 	if (hfi_number == 1) {
++		pol_dump_queue("0 (ours)", (volatile uint32_t *)hfi + 6);
++		pol_dump_queue("1 (answers)", (volatile uint32_t *)hfi + 18);
+ 		printf("adreno: %u: HFI probe: queue0.start=%#x data=%#llx table=%#llx write idx=%u status=%u type=%#x\n",
+ 		    step, queue->start, (unsigned long long)(vm_offset_t)data,
+ 		    (unsigned long long)(vm_offset_t)hfi, queue->write, queue->status, queue->type);
