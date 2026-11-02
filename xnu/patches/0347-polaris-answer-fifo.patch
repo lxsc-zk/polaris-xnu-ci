@@ -1,0 +1,25 @@
+Subject: [PATCH] polaris: take the first answer in queue 1, as the working sender does
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3454,11 +3454,16 @@
+ 		queue->read = (at + 3) / 4 * 4 % HFI_QUEUE_WORDS;
+ 		if (((message[0] >> 16) & 0xf) == HFI_ANSWER || ((message[0] >> 16) & 0xf) == 1) {
+ 			/* polaris: accept the type this firmware uses (2) and the one assumed before (1) */
++			/*
++			 * polaris: the firmware answers one message late, so the echo in the queue
++			 * need not be ours -- take the first answer of the right type, as
++			 * polaris_hfi_xfer() does, and keep the sequence for the log only.
++			 */
+ 			*verdict = message[2];
+-			answered = message[1] >> 20 == number;
+-			if (!answered) {
+-				printf("adreno: %u: HFI: an answer for message %u, not %u: %#x %#x %#x\n", step,
+-				    message[1] >> 20, number, message[0], message[1], message[2]);
++			answered = true;
++			if ((message[1] >> 20) != number) {
++				printf("adreno: %u: HFI: answer carries sequence %u while %u was sent (taken anyway)\n",
++				    step, message[1] >> 20, number);
+ 			}
+ 		} else {
+ 			message[7] = 0;
