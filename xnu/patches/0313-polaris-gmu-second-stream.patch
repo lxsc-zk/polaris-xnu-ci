@@ -1,0 +1,43 @@
+Subject: [PATCH] polaris: route the firmware's second stream into the GMU's context
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1870,7 +1870,11 @@
+ 			return false;
+ 		}
+ 		gmu_space_is_on = true;
+-		return space_on(&gmu_space, GMU_MATCH, GMU_STREAM);
++		if (!space_on(&gmu_space, GMU_MATCH, GMU_STREAM)) {
++			return false;
++		}
++		(void)space_stream(&gmu_space, 1, 4);
++		return true;
+ 	}
+ 	for (uint64_t at = 0; at + sizeof(struct gmu_firmware_block) <= gmu_firmware_size;) {
+ 		struct gmu_firmware_block block;
+@@ -1904,7 +1908,24 @@
+ 		return false;
+ 	}
+ 	gmu_space_is_on = true;         /* whatever of it has been written by the time something fails is taken back */
+-	return space_on(&gmu_space, GMU_MATCH, GMU_STREAM);
++	if (!space_on(&gmu_space, GMU_MATCH, GMU_STREAM)) {
++		return false;
++	}
++	/*
++	 * polaris: and the second stream the firmware uses. The SMMU dump this port recorded
++	 * (STATUS.md, the CMG experiment) had both SMR[3]=0x80000004 and SMR[4]=0x80000005
++	 * live with S2CR 0x300, while this driver routes only stream 5 -- so the table read
++	 * the firmware does the moment HFI_CTRL_INIT lands had no entry of its own, which is
++	 * the untranslated access that stalls the AHB before anything can be printed.
++	 */
++	if (!space_stream(&gmu_space, 1, 4)) {
++		printf("adreno: %u: polaris: stream 4 will not take; the firmware's table reads may fault\n", step);
++	}
++	for (unsigned i = 0; i < 5; i++) {
++		printf("adreno: %u: polaris: SMMU slot %u: smr=%#x s2cr=%#x\n", step, i,
++		    rd(smmu.base + SMMU_SMR(i)), rd(smmu.base + SMMU_S2CR(i)));
++	}
++	return true;
+ }
+ 
+ /* ---- step 14: the GMU's firmware ----------------------------------------------------------------------- */
