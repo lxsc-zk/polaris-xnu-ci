@@ -1,0 +1,44 @@
+Subject: [PATCH] polaris: keep the HFI table the working space built
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1826,6 +1826,7 @@
+ static bool verbatim;           /* adreno_verbatim=1: the whole sequence from mi8flow.inc, nothing else */
+ static bool legacy_sent;        /* the legacy five have gone out: no a6xx/Linux messages after them */
+ static uint32_t legacy_mask;    /* which of the five the GMU took */
++static bool hfi_table_set;      /* the working space built the table: step 15 must not rebuild it */
+ static uint32_t hfi_phys, log_phys;
+ static uint32_t gmu_bypass_slot[2] = { 0, 1 };
+ static void gmu_post_mortem(void);
+@@ -2148,6 +2149,15 @@
+ 	 * struct in this file put status first and 168 words in the size field, so the
+ 	 * firmware read queue addresses where it expected flag words and vice versa.
+ 	 */
++	if (hfi_table_set) {
++		/*
++		 * polaris: the working space already laid the table out with the queues one page
++		 * apart (0x6000a000/b000/c000), which is where hfi_send() writes. Rebuilding it
++		 * with the other layout here is what made every legacy message go unanswered.
++		 */
++		printf("adreno: %u: polaris: the HFI table is the working space's; not rebuilding it\n", step);
++		goto table_done;
++	}
+ 	{
+ 		static const uint8_t queue_id[3] = { 0, 4, 5 };
+ 		static const uint8_t queue_prio[3] = { 10, 10, 40 };
+@@ -2188,6 +2198,7 @@
+ 		}
+ 		__asm__ __volatile__("dsb sy" ::: "memory");
+ 	}
++table_done:
+ 	printf("adreno: %u: HFI table at %#x: header %u/%u/%u/%u, queues at %#x %#x %#x, sfr %#x (polaris)\n",
+ 	    step, GMU_HFI_ADDRESS, 42u, 6u, 12u, 3u, GMU_HFI_ADDRESS + 168u,
+ 	    GMU_HFI_ADDRESS + 168u + (4096u + 16u), GMU_HFI_ADDRESS + 168u + 2u * (4096u + 16u),
+@@ -3272,6 +3283,7 @@
+ 		printf("adreno: %u: polaris: firmware into ITCM: %u words read back wrong\n", step, bad);
+ 	}
+ 	gmu_space_is_on = true;         /* step 15 will not start the CM3 without it */
++	hfi_table_set = true;           /* the queue table is this one, at 0x1000*(i+1) */
+ 	return true;
+ }
+ 
