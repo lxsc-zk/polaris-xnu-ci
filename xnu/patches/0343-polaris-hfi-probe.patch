@@ -1,0 +1,38 @@
+Subject: [PATCH] polaris: probe the first HFI message
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3540,6 +3540,11 @@
+ 	printf("adreno: %u: about to send the GMU %s: message %u, %u words, number %u\n", step, what, id, words, number);
+ 	snprintf(last_write, sizeof(last_write), "step %u sent the GMU message %u (%s)", step, id, what);
+ 	hold(true);
++	if (hfi_number == 1) {
++		printf("adreno: %u: HFI probe: queue0.start=%#x data=%#llx table=%#llx write idx=%u status=%u type=%#x\n",
++		    step, queue->start, (unsigned long long)(vm_offset_t)data,
++		    (unsigned long long)(vm_offset_t)hfi, queue->write, queue->status, queue->type);
++	}
+ 	for (uint32_t i = 0; i < (words + 3) / 4 * 4; i++) {
+ 		data[at] = i < words ? message[i] : 0xfafafafa;
+ 		at = (at + 1) % HFI_QUEUE_WORDS;
+@@ -3551,9 +3556,19 @@
+ 	 * cache and the firmware sees zeros.
+ 	 */
+ 	to_memory((vm_offset_t)hfi, 0x4000u);
++	if (hfi_number == 1) {
++		volatile uint32_t *back = (volatile uint32_t *)data;
++
++		printf("adreno: %u: HFI probe: in memory now: %#x %#x %#x %#x (table write=%u status=%u)\n", step,
++		    back[0], back[1], back[2], back[3], queue->write, queue->status);
++	}
+ 	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
+-	for (int i = 0; i < 10000 && !answered; i++) {
+-		sleep_us(100);
++	for (int i = 0; i < 100000 && !answered; i++) {
++		sleep_us(20);
++		if (hfi_number == 1 && i == 500) {
++			printf("adreno: %u: HFI probe: after 10 ms no answer yet, gmu2host=%#x hfi_status=%#x\n", step,
++			    rd(gmu.base + GMU_GMU2HOST_INTR_INFO), rd(gmu.base + GMU_HFI_CTRL_STATUS));
++		}
+ 		waiting = rd(gmu.base + GMU_GMU2HOST_INTR_INFO);
+ 		if (waiting & 1) {
+ 			wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 1);
