@@ -1,0 +1,146 @@
+Subject: [PATCH] polaris: GMU streams through CB1 with ASID 1, and the legacy five messages
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2038,6 +2038,9 @@
+ static void gmu_pdc_rsc_setup(void);
+ static bool gmu_rail_vote(void);
+ static bool gmu_rail_before_hfi(void);
++static void gmu_cb1_mirror(void);
++static bool gmu_hfi_legacy_messages(void);
++static bool hfi_send(const char *what, uint32_t id, uint32_t *message, uint32_t words);
+ 
+ #define GMU_ICACHE_CONFIG       GMU_WORD(0x4c00)
+ #define GMU_DCACHE_CONFIG       GMU_WORD(0x4c01)
+@@ -2614,6 +2617,111 @@
+ 	return (rd(gmu.base + 0x14340u) & 0x38u) == 0x28u;
+ }
+ 
++/*
++ * polaris: the GMU's streams through context bank 1, as mi8flow.inc (the image that painted
++ * the screen) has them -- S2CR(1)=1 with SID 5, S2CR(2)=1 with SID 4, and CB1's TTBR0 carrying
++ * ASID 1 (its root is `pt | (1 << 48)`). This driver's own space routes the same SIDs to
++ * context 2 with ASID 0; mirror the page table it built into CB1 and move both streams there,
++ * leaving the original entries invalid so the lower slot cannot win the match instead.
++ */
++static void
++gmu_cb1_mirror(void)
++{
++	uint32_t from = smmu_context(&gmu_space);
++	uint32_t to = (smmu_pages + 1u) * smmu_page;            /* context bank 1 */
++	uint64_t root;
++	uint32_t control;
++
++	if (!smmu_layout()) {
++		return;
++	}
++	root = ((uint64_t)rd(smmu.base + from + SMMU_CB_TTBR0 + 4u) << 32) |
++	    rd(smmu.base + from + SMMU_CB_TTBR0);
++	control = rd(smmu.base + from + SMMU_CB_SCTLR);
++	if (root == 0) {
++		printf("adreno: %u: polaris: the GMU's page table is not there; leaving CB1 alone\n", step);
++		return;
++	}
++	root &= ~(0xffffull << 48);                             /* drop the old ASID */
++	root |= (uint64_t)1 << 48;                              /* the working image's ASID 1 */
++	wr(smmu.base + to + SMMU_CB_SCTLR, 0);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	wr(smmu.base + smmu_page + SMMU_CBA2R(1), SMMU_CBA2R_64_BIT);
++	wr(smmu.base + smmu_page + SMMU_CBAR(1), SMMU_CBAR_STAGE_1);
++	wr(smmu.base + to + SMMU_CB_TCR2, rd(smmu.base + from + SMMU_CB_TCR2));
++	wr(smmu.base + to + SMMU_CB_TCR, rd(smmu.base + from + SMMU_CB_TCR));
++	wr(smmu.base + to + SMMU_CB_TTBR0, (uint32_t)root);
++	wr(smmu.base + to + SMMU_CB_TTBR0 + 4u, (uint32_t)(root >> 32));
++	wr(smmu.base + to + SMMU_CB_TTBR1, 0);
++	wr(smmu.base + to + SMMU_CB_TTBR1 + 4u, 0);
++	wr(smmu.base + to + SMMU_CB_MAIR0, rd(smmu.base + from + SMMU_CB_MAIR0));
++	wr(smmu.base + to + SMMU_CB_MAIR1, 0);
++	wr(smmu.base + to + SMMU_CB_FSR, SMMU_FSR_ALL);
++	wr(smmu.base + to + SMMU_CB_TLBIASID, 1);
++	wr(smmu.base + to + SMMU_CB_TLBSYNC, 1);
++	for (int i = 0; i < 100000 && (rd(smmu.base + to + SMMU_CB_TLBSTATUS) & 1); i++) {
++	}
++	wr(smmu.base + to + SMMU_CB_SCTLR, control | 1u);
++	/* the streams: 5 -> slot 1, 4 -> slot 2, both to context bank 1 */
++	wr(smmu.base + SMMU_S2CR(1), 1);
++	wr(smmu.base + SMMU_SMR(1), SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | 5u);
++	wr(smmu.base + SMMU_S2CR(2), 1);
++	wr(smmu.base + SMMU_SMR(2), 0x80000004u);
++	wr(smmu.base + SMMU_SMR(0), 0);                         /* drop the context-2 entry for SID 5 */
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	printf("adreno: %u: polaris: CB1 mirrors CB2 (root %#llx, asid 1); slots: 1=0x%x/0x%x 2=0x%x/0x%x 0=0x%x\n", step,
++	    (unsigned long long)root, rd(smmu.base + SMMU_S2CR(1)), rd(smmu.base + SMMU_SMR(1)),
++	    rd(smmu.base + SMMU_S2CR(2)), rd(smmu.base + SMMU_SMR(2)), rd(smmu.base + SMMU_SMR(0)));
++}
++
++/*
++ * polaris: the five messages the legacy firmware expects once HFI reports started, in the
++ * order and with the ids mi8flow.inc uses: INIT(0) FW_VERSION(1) PERF(4) BW(3) TEST(5).
++ * The driver only had the a6xx/Linux set, in step 17, which this firmware never sees.
++ */
++static bool
++gmu_hfi_legacy_messages(void)
++{
++	static uint32_t m[160];
++	static const uint32_t gk[8] = { 0u, 257000u, 342000u, 414000u, 520000u, 596000u, 675000u, 710000u };
++	bool ok;
++
++	for (unsigned i = 0; i < 160; i++) {
++		m[i] = 0;
++	}
++	m[1] = 0; m[2] = 0x60001000u; m[3] = 0x4000u; m[4] = 1u;
++	ok = hfi_send("the legacy INIT", 0, m, 5);
++	for (unsigned i = 0; i < 160; i++) {
++		m[i] = 0;
++	}
++	m[1] = (1u << 28) | (1u << 19) | (1u << 17);
++	ok = ok && hfi_send("the firmware version", 1, m, 2);
++	for (unsigned i = 0; i < 160; i++) {
++		m[i] = 0;
++	}
++	m[1] = 8; m[2] = 3;
++	for (unsigned i = 0; i < 8; i++) {
++		m[3u + 2u * i] = (gk[i] ? 64u : 0u) << 16 | (i << 8) | i;
++		m[4u + 2u * i] = gk[i];
++	}
++	ok = ok && hfi_send("the speed table", 4, m, 43);
++	for (unsigned i = 0; i < 160; i++) {
++		m[i] = 0;
++	}
++	m[1] = 1; m[2] = 3; m[3] = 3; m[4] = 5; m[5] = 7;
++	m[6] = 0x50034u; m[7] = 0x5007cu; m[8] = 0x5004cu;
++	m[12] = 0x40000000u; m[14] = 0x40000000u;
++	m[18] = 0x60000001u; m[19] = 0x20000001u; m[20] = 0x60000001u;
++	m[24] = 0x50000u; m[25] = 0x5005cu; m[26] = 0x5000cu;
++	m[32] = 0x40000000u; m[33] = 0x40000000u; m[34] = 0x40000000u;
++	ok = ok && hfi_send("the bus table", 3, m, 160);
++	for (unsigned i = 0; i < 160; i++) {
++		m[i] = 0;
++	}
++	ok = ok && hfi_send("the loopback test", 5, m, 1);
++	return ok;
++}
++
+ static bool
+ step_gmu_queues(void)
+ {
+@@ -2624,6 +2732,8 @@
+ 	 * polaris: the rail first -- the working image brings GX up before HFI, not after.
+ 	 */
+ 	(void)gmu_rail_before_hfi();
++	/* polaris: and the streams into context bank 1, with the ASID the working image uses */
++	gmu_cb1_mirror();
+ 	announce("enable the GPU's part of the always-on sequencer and give the GMU's RPMh channel its program");
+ 	if (skip_rsc_table) {
+ 		printf("adreno: %u: adreno_skip_rsc=1: leaving the RSCC/PDC sequence table alone here too\n", step);
+@@ -2696,6 +2806,10 @@
+ 	get(&gmu, "hfi_version_info", GMU_HFI_VERSION_INFO);
+ 	gmu_talks = true;
+ 	printf("adreno: %u: THE GMU'S MESSAGE QUEUES ARE UP\n", step);
++	/*
++	 * polaris: the legacy firmware wants its five messages now, not in step 17.
++	 */
++	(void)gmu_hfi_legacy_messages();
+ 	return !space_faulted(&gmu_space);
+ }
+ 
