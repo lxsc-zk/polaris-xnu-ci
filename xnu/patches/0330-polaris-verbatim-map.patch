@@ -1,0 +1,26 @@
+Subject: [PATCH] polaris: map the register windows before the verbatim flow uses them
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2815,12 +2815,18 @@
+ static bool
+ pol_verbatim_flow(void)
+ {
+-	vm_offset_t pd = ml_io_map(0x0b280000u, 0x10000u);
+-	vm_offset_t sq = ml_io_map(0x0b480000u, 0x10000u);
++	vm_offset_t pd, sq;
+ 	uint32_t v;
+ 	int i;
+ 
+-	if (!pd || !sq || !smmu_layout()) {
++	/* the blocks are mapped lazily on first use; this path runs before the steps do it */
++	need(&gcc);
++	need(&gpucc);
++	need(&gmu);
++	need(&smmu);
++	pd = ml_io_map(0x0b280000u, 0x10000u);
++	sq = ml_io_map(0x0b480000u, 0x10000u);
++	if (!gcc.base || !gpucc.base || !gmu.base || !pd || !sq || !smmu_layout()) {
+ 		printf("POLARIS VERBATIM: map failed\n");
+ 		return false;
+ 	}
