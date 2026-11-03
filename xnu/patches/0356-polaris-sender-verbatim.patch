@@ -1,0 +1,144 @@
+Subject: [PATCH] polaris: the working image's HFI sender, moved over whole
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3590,102 +3590,56 @@
+ 	get(&gmu, "ahb_fence_status", GMU_AHB_FENCE_STATUS);
+ }
+ 
+-/* Send a message whose first word is yet to be made and wait for the GMU's verdict on it. */
+-static bool
++static uint32_t
+ hfi_send(const char *what, uint32_t id, uint32_t *message, uint32_t words)
+ {
+ 	volatile struct hfi_queue *queue = &hfi->queue[0];
+ 	volatile uint32_t *data = (volatile uint32_t *)((vm_offset_t)hfi + HFI_QUEUE_AT(0));
+-	uint32_t at = queue->write % HFI_QUEUE_WORDS, start_at = at;
+-	uint32_t number = ++hfi_number & 0xfff, verdict = 0, waiting = 0;
+-	bool answered = false;
++	volatile struct hfi_queue *answers = &hfi->queue[1];
++	volatile uint32_t *adata = (volatile uint32_t *)((vm_offset_t)hfi + HFI_QUEUE_AT(1));
++	uint32_t number = ++hfi_number & 0xfff;
++	uint32_t idx, k, info = 0, ri, n, verdict = 0xffffffffu;
+ 
+-	message[0] = id | words << 8 | number << 20;
+-	printf("adreno: %u: about to send the GMU %s: message %u, %u words, number %u\n", step, what, id, words, number);
+-	snprintf(last_write, sizeof(last_write), "step %u sent the GMU message %u (%s)", step, id, what);
+-	hold(true);
+-	if (hfi_number == 1) {
+-		printf("adreno: %u: HFI probe: queue0.start=%#x data=%#llx table=%#llx write idx=%u status=%u type=%#x\n",
+-		    step, queue->start, (unsigned long long)(vm_offset_t)data,
+-		    (unsigned long long)(vm_offset_t)hfi, queue->write, queue->status, queue->type);
+-	}
+-	for (uint32_t i = 0; i < (words + 3) / 4 * 4; i++) {
+-		data[at] = i < words ? message[i] : 0xfafafafa;
+-		at = (at + 1) % HFI_QUEUE_WORDS;
+-	}
+ 	/*
+-	 * polaris: the write index is what tells the firmware there is work; set it by explicit
+-	 * address (table + 0x44 = the queue entry's +0x2c), clean that line on its own, and read
+-	 * it back before trusting it.
++	 * polaris (0356): the working image's sender, moved over whole. It is
++	 * polaris_hfi_xfer() in bsd/dev/polaris_gpu_diag.c, which in this same kernel gets
++	 * err=0x00000000 for id=0..5: tight poll, one clear of bit 0, then read queue 1 at its
++	 * read index without looking at the interrupt again.
+ 	 */
+-	{
+-		vm_offset_t index_at = (vm_offset_t)hfi + 0x44u;
+-		uint32_t before = rd(index_at);
+-
+-		/* polaris: derive it from where we started, not from the loop's cursor */
+-		at = (start_at + ((words + 3u) / 4u) * 4u) % HFI_QUEUE_WORDS;
+-		wr(index_at, at);
+-		__asm__ __volatile__("dsb sy" ::: "memory");
+-		to_memory(index_at & ~(vm_offset_t)63, 64);
+-		to_memory((vm_offset_t)hfi, 0x4000u);
+-		if (hfi_number == 1) {
+-			volatile uint32_t *back = (volatile uint32_t *)data;
+-
+-			printf("adreno: %u: HFI probe: write index %u -> %u (read back %u) for %u words, in memory: "
+-			    "%#x %#x %#x %#x\n", step, before, at, rd(index_at), words, back[0], back[1], back[2], back[3]);
+-		}
+-		if (rd(index_at) != at) {
+-			printf("adreno: %u: polaris: the write index will not stick (%u); sending anyway\n", step,
+-			    rd(index_at));
+-		}
++	message[0] = (number << 20) | ((words & 0xffu) << 8) | (id & 0xffu);
++	idx = queue->write & (HFI_QUEUE_WORDS - 1u);
++	for (k = 0; k < (words + 3u) / 4u * 4u; k++) {
++		data[idx] = k < words ? message[k] : 0xfafafafau;
++		idx = (idx + 1u) & (HFI_QUEUE_WORDS - 1u);
+ 	}
++	queue->write = idx;
++	to_memory((vm_offset_t)hfi, 0x4000u);
+ 	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
+-	for (int i = 0; i < 100000 && !answered; i++) {
+-		sleep_us(20);
+-		/*
+-		 * polaris: an answer may already be waiting -- the firmware posts two at once, and
+-		 * only the first was announced by the interrupt we cleared. Read the queue on every
+-		 * pass, as polaris_hfi_xfer does, so a queued answer is not skipped.
+-		 */
+-		answered = hfi_receive(1, number, &verdict);
+-		if (answered) {
+-			break;
+-		}
+-		/*
+-		 * polaris: the firmware did not act on the first doorbell -- in the bring-up the
+-		 * same five words were answered off it in 25 polls. Ring it again every 5 ms; a
+-		 * repeated set bit is harmless and is what a tight poll loop amounts to.
+-		 */
+-		if (i % 250 == 249) {
+-			wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
+-		}
+-		if (hfi_number == 1 && i == 500) {
+-			printf("adreno: %u: HFI probe: after 10 ms no answer yet, gmu2host=%#x hfi_status=%#x\n", step,
+-			    rd(gmu.base + GMU_GMU2HOST_INTR_INFO), rd(gmu.base + GMU_HFI_CTRL_STATUS));
+-		}
+-		waiting = rd(gmu.base + GMU_GMU2HOST_INTR_INFO);
+-		if (waiting & 1) {
+-			wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 1);
+-			answered = hfi_receive(1, number, &verdict);
+-		}
+-		if (rd(gmu.base + GMU_CM3_FW_INIT_RESULT) & GMU_FAILED) {
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	for (k = 0; k < 2000000u; k++) {
++		info = rd(gmu.base + GMU_GMU2HOST_INTR_INFO);
++		if (info & 1u) {
+ 			break;
+ 		}
+ 	}
+-	hfi_receive(2, ~0u, &waiting);
+-	if (!answered || verdict != 0) {
+-		printf("adreno: %u: the GMU %s (%#x) to %s; fw_init_result %#x, gmu2host_intr_info %#x\n", step,
+-		    answered ? "says no" : "does not answer", verdict, what, rd(gmu.base + GMU_CM3_FW_INIT_RESULT),
+-		    rd(gmu.base + GMU_GMU2HOST_INTR_INFO));
+-		space_faulted(&gmu_space);
+-		if (!post_mortem_done) {
+-			post_mortem_done = true;
+-			gmu_post_mortem();
+-		}
+-		return false;
++	if (!(info & 1u)) {
++		printf("adreno: %u: HFI: %s (id %u, %u words, number %u) NO ANSWER info=%#x\n", step, what, id,
++		    words, number, info);
++		return 0xffffffffu;
++	}
++	wr(gmu.base + GMU_GMU2HOST_INTR_CLR, 1);
++	__asm__ __volatile__("dsb sy" ::: "memory");
++	to_memory((vm_offset_t)hfi, 0x4000u);
++
++	ri = answers->read & (HFI_QUEUE_WORDS - 1u);
++	n = (adata[ri] >> 8) & 0xffu;
++	if (n >= 3u) {
++		verdict = adata[(ri + 2u) & (HFI_QUEUE_WORDS - 1u)];
+ 	}
+-	printf("adreno: %u: the GMU accepts %s\n", step, what);
+-	return true;
++	answers->read = (ri + (n ? n : 1u)) & (HFI_QUEUE_WORDS - 1u);
++	printf("adreno: %u: HFI: %s (id %u, %u words, number %u) err=%#x payload=%#x\n", step, what, id, words,
++	    number, verdict, n >= 4u ? adata[(ri + 3u) & (HFI_QUEUE_WORDS - 1u)] : 0u);
++	return verdict;
+ }
+ 
+ /*
