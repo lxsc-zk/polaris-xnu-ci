@@ -160,3 +160,53 @@ Subject: [PATCH] polaris: the early hand-off, with its declarations up front
  	static const struct {
  		uint32_t khz, level;
  	} speeds[] = { { 0, 0 }, { 315000, 64 }, { 450000, 128 }, { 550000, 192 } };
+@@ -4181,6 +4255,9 @@
+ static bool
+ step_core_space(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	const uint8_t *microcode;
+ 	uint64_t size = 0;
+ 	uint32_t stream1 = 1;
+@@ -4264,6 +4341,9 @@
+ static bool
+ step_zap_load(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	const uint8_t *segment;
+ 	volatile uint8_t *memory;
+ 	uint64_t size = 0, header = 0, answer = ~0ull;
+@@ -4323,6 +4403,9 @@
+ static bool
+ step_core_start(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	static const uint32_t address_modes[] = { 0x0842, 0x0c01, 0x8601, 0x8e05, 0x9e01, 0xbe05, 0xa601, 0x9601, 0x0e00, 0xae01,
+ 		                                  0xb601, 0xf810 };
+ 	uint32_t blind = 0;
+@@ -4439,6 +4522,9 @@
+ static bool
+ step_core_commands(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	volatile uint32_t *scratch = (volatile uint32_t *)core_scratch.memory;
+ 
+ 	if (!cx_ready() || !core_runs) {
+@@ -4518,6 +4604,9 @@
+ static bool
+ step_frame(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	const volatile uint8_t *pixel;
+ 
+ 	if (!cx_ready() || !core_runs) {
