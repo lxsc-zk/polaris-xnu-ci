@@ -1,0 +1,26 @@
+Subject: [PATCH] polaris: SPTPRAC power-up before GPU_SET, with this board's registers
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3869,6 +3869,21 @@
+ 		    (rail_grant & (1u << 30)) ? "ACKED" : "TIMEOUT", rail_grant,
+ 		    rd(gmu.base + GMU_RPMH_POWER_STATE));
+ 	}
++	/*
++	 * polaris (0368): dipper's gmu_sptprac_enable(), with this board's registers. Its
++	 * gmu_gfx_rail_on() powers SPTPRAC up between the rail grant and HFI; without it the
++	 * firmware never issues the GPU_SET grant at 0x507e648 bit 24.
++	 *   control 0x778000 at gmu+0x204   (dipper GMU_SPTPRAC_CTRL_W)
++	 *   status 0x38 == 0x28 at gmu+0x340 (this driver's GMU_SPTPRAC_PWR_CLK_STATUS)
++	 */
++	wr(gmu.base + 0x204u, 0x778000u);
++	{
++		bool sptp_on = wait_for(&gmu, GMU_SPTPRAC_PWR_CLK_STATUS, 0x38, 0x28, 200);
++
++		printf("adreno: %u: polaris: SPTPRAC enable: status %#x (%s), gx_gdscr %#x\n", step,
++		    rd(gmu.base + GMU_SPTPRAC_PWR_CLK_STATUS), sptp_on ? "on" : "NOT on",
++		    rd(gpucc.base + GPUCC_GX_GDSCR));
++	}
+ 	announce("ask the GMU to power the 3D core and keep it powered");
+ 	get(&gmu, "sptprac_pwr_clk_status", GMU_SPTPRAC_PWR_CLK_STATUS);
+ 	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
