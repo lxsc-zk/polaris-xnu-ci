@@ -1,0 +1,156 @@
+Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clean state
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -505,6 +505,43 @@
+ static bool
+ step_gpucc(void)
+ {
++	/*
++	 * polaris (0376): hand the entire GPU bring-up to polaris_mi8_flow before this driver
++	 * touches a single GPU register -- the state the diag path runs from, and the only one
++	 * where this flow has been seen to answer all six HFI messages and reach G3D, CP, ZAP.
++	 */
++	if (!mi8flow_tried) {
++		extern int polaris_mi8_flow(vm_offset_t, vm_offset_t, vm_offset_t, vm_offset_t, int);
++		vm_size_t sqe_size = 0, md_size = 0, b02_size = 0;
++		vm_offset_t sqe, md, b02;
++
++		mi8flow_tried = true;
++		if (gmu_firmware == NULL) {
++			gmu_firmware = image_file("fw", "a660_gmu.bin", &gmu_firmware_size);
++		}
++		sqe = image_file("fw", "a630_sqe.fw", &sqe_size);
++		md = image_file("fw", "a630_zap.mdt", &md_size);
++		b02 = image_file("fw", "a630_zap.b02", &b02_size);
++		if (sqe && md && b02 && gmu_firmware != NULL) {
++			printf("adreno: %u: polaris: handing the whole bring-up to polaris_mi8_flow "
++			    "(sqe %lu, mdt %lu, b02 %lu)\n", step, (unsigned long)sqe_size,
++			    (unsigned long)md_size, (unsigned long)b02_size);
++			if (polaris_mi8_flow((vm_offset_t)gmu_firmware, sqe, md, b02, 0) == 0) {
++				mi8flow_took = true;
++				printf("adreno: %u: polaris: polaris_mi8_flow took the GPU up; the GPU steps "
++				    "stand aside\n", step);
++			} else {
++				printf("adreno: %u: polaris: polaris_mi8_flow did not take; continuing step by step\n", step);
++			}
++		} else {
++			printf("adreno: %u: polaris: blobs missing (sqe %d mdt %d b02 %d fw %d)\n", step,
++			    sqe != 0, md != 0, b02 != 0, gmu_firmware != NULL);
++		}
++	}
++	if (mi8flow_took) {
++		return true;
++	}
++
+ 	announce("make sure the clock of the GPU clock controller's registers runs (gcc_gpu_cfg_ahb)");
+ 	if ((set(&gcc, "gpu_cfg_ahb", GCC_GPU_CFG_AHB_CBCR, CBCR_ENABLE) & CBCR_OFF) &&
+ 	    !wait_for(&gcc, GCC_GPU_CFG_AHB_CBCR, CBCR_OFF, 0, 10)) {
+@@ -579,6 +616,9 @@
+ static bool
+ step_cx_power(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	uint32_t gdscr;
+ 
+ 	if (!gpucc_answers()) {
+@@ -692,6 +732,9 @@
+ static bool
+ step_clocks(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	if (!gpucc_answers()) {
+ 		return false;
+ 	}
+@@ -1097,6 +1140,9 @@
+ static bool
+ step_rscc(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	if (!cx_ready()) {
+ 		return false;
+ 	}
+@@ -1188,6 +1234,9 @@
+ static bool
+ step_smmu_context(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	uint32_t context;
+ 
+ 	if (!cx_ready()) {
+@@ -1216,6 +1265,9 @@
+ static bool
+ step_gmu_memory(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	static const uint32_t pattern[2] = { 0x600d0001, 0x0a110002 };
+ 	uint32_t was[2], back[2];
+ 
+@@ -1854,6 +1906,7 @@
+ static uint32_t legacy_mask;    /* which of the five the GMU took */
+ static bool hfi_table_set;      /* the working space built the table: step 15 must not rebuild it */
+ static bool mi8flow_took;       /* polaris_mi8_flow brought the GPU up: later steps stand aside */
++static bool mi8flow_tried;      /* the hand-off has been attempted exactly once */
+ /* polaris: twelve words of a queue header, to read the layout off rather than assume it. */
+ static void
+ pol_dump_queue(const char *what, volatile uint32_t *q)
+@@ -1880,6 +1933,9 @@
+ static bool
+ step_gmu_space(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	/*
+ 	 * polaris (0371): hand the whole bring-up to polaris_mi8_flow while the GMU is still in
+ 	 * reset -- that is the one implementation on this hardware that gets the GPU_SET grant
+@@ -2071,6 +2127,9 @@
+ step_gmu_firmware(void)
+ {
+ 	if (mi8flow_took) {
++		return true;
++	}
++	if (mi8flow_took) {
+ 		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
+ 		return true;
+ 	}
+@@ -2212,6 +2271,9 @@
+ step_gmu_start(void)
+ {
+ 	if (mi8flow_took) {
++		return true;
++	}
++	if (mi8flow_took) {
+ 		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
+ 		return true;
+ 	}
+@@ -3415,6 +3477,9 @@
+ step_gmu_queues(void)
+ {
+ 	if (mi8flow_took) {
++		return true;
++	}
++	if (mi8flow_took) {
+ 		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
+ 		return true;
+ 	}
+@@ -3854,6 +3919,9 @@
+ static bool
+ step_core_power(void)
+ {
++	if (mi8flow_took) {
++		return true;
++	}
+ 	static const struct {
+ 		uint32_t khz, level;
+ 	} speeds[] = { { 0, 0 }, { 315000, 64 }, { 450000, 128 }, { 550000, 192 } };
