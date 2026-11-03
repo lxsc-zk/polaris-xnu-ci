@@ -1,0 +1,49 @@
+Subject: [PATCH] polaris: the redwood shim file and its build entry
+
+--- a/bsd/dev/polaris_redwood_shim.c
++++ b/bsd/dev/polaris_redwood_shim.c
+@@ -0,0 +1,34 @@
++/*
++ * polaris (0391): the little that dipper's mi8_adreno.c expects from its neighbours.
++ *
++ * mi8_adreno.c is self-contained apart from three symbols: the finder it uses for the GPU's
++ * firmware, the entry of the kept-on service Mesa talks to, and a battery temperature that
++ * only appears in a log line. This port's image reader already finds fw/ files in the small
++ * image, so the first is a thin wrapper over it.
++ */
++#include <sys/types.h>
++#include <sys/cdefs.h>
++
++__BEGIN_DECLS
++extern const uint8_t *hakios_image_file(const char *dir, const char *name, uint64_t *size, int *disk_out);
++__END_DECLS
++
++const uint8_t *
++redwood_wifi_file(const char *name, uint64_t *size)
++{
++	int disk = 0;
++
++	return hakios_image_file("fw", name, size, &disk);
++}
++
++void
++RedwoodGPUStart(void)
++{
++	/* nothing to publish: this kernel has no window server to hand the GPU to yet */
++}
++
++int
++redwood_battery_temperature(void)
++{
++	return 25;                      /* only printed; no thermal policy reads it here */
++}
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -115,6 +115,7 @@
+ bsd/dev/polaris_touch_i2c.c		standard
+ bsd/dev/polaris_gpu_diag.c		standard
+ bsd/dev/mi8_adreno.c		standard
++bsd/dev/polaris_redwood_shim.c		standard
+ bsd/dev/polaris_gpu_power.c		standard
+ bsd/dev/polaris_gpu.c			standard
+ bsd/dev/mem.c				standard
