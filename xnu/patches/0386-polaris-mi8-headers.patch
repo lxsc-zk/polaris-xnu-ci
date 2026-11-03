@@ -1,0 +1,35 @@
+Subject: [PATCH] polaris: the headers mi8_adreno.c includes
+
+--- a/bsd/sys/redwood_input.h
++++ b/bsd/sys/redwood_input.h
+@@ -0,0 +1,30 @@
++void mi8_fts_init(void);                /* boot-arg fts=1 fts_steps=6: the Mi 8 touch screen (ST FTM5), steps 1-5 its probe */
++void mi8_adreno_init(void);             /* boot-arg mi8gpu=N: the first N steps of waking the Mi 8 GPU (Adreno 630) */
++void mi8_rproc_init(void);              /* boot-arg mi8rp_step=N: the first N steps of the Mi 8 remote processors (SMEM, modem, ...) */
++void redwood_ufs_init(void);           /* ufs=2 to xnuloader: the phone's storage, read only, through the loader (ufs_shared_pa=) */
++void redwood_ufs_report(const char *when); /* where reading the storage has spent its time so far */
++bool redwood_ufs_dev(dev_t dev);           /* one of the storage's devices */
++void redwood_gpu_report(const char *why);
++bool redwood_gpu_recover(void);
++void redwood_gpu_stop(void);
++
++/* The Mi 8's GPU kept on (boot-arg gpu=1; bsd/dev/mi8_adreno.c): redwood_adreno.c hands the calls above over to these when it is on. */
++bool mi8_gpu_kept(void);
++bool mi8_gpu_parameter(uint32_t which, uint64_t *value);
++uint64_t mi8_gpu_address(uint64_t size);
++void mi8_gpu_address_free(uint64_t address, uint64_t size);
++void mi8_gpu_space(uint64_t *used, uint32_t *live, uint64_t *largest, unsigned *holes, unsigned *most, uint64_t *lost, uint32_t *refused);
++bool mi8_gpu_map(uint64_t address, uint64_t phys, bool read_only);
++void mi8_gpu_mapped(void);
++void mi8_gpu_unmap(uint64_t address, uint64_t size);
++void mi8_gpu_to_memory(void *start, uint64_t size);
++uint32_t mi8_gpu_submit(const uint64_t *addresses, const uint32_t *words, uint32_t count);
++bool mi8_gpu_done(uint32_t fence);
++uint32_t mi8_gpu_last(void);
++void mi8_gpu_worked(uint64_t *microseconds, uint32_t *submissions, uint32_t by[7]);
++void mi8_gpu_report(const char *why);
++bool mi8_gpu_recover(void);
++void mi8_gpu_stop(void);
++#endif
++
++#endif /* _SYS_REDWOOD_INPUT_H_ */
