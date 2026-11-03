@@ -1,6 +1,18 @@
-diff -ru --label a/bsd/dev --label b/bsd/dev a/bsd/dev b/bsd/dev
---- a/bsd/dev
-+++ b/bsd/dev
+Subject: [PATCH] polaris: the driver calls polaris_mi8_flow instead of re-deriving it
+
+--- a/bsd/dev/polaris_gpu_diag.c
++++ b/bsd/dev/polaris_gpu_diag.c
+@@ -1600,7 +1600,7 @@
+ 	printf("POLARIS PREBOOT: thread started (25 s), then it creates the cookie\n");
+ }
+ 
+-static int
++int
+ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+     vm_offset_t mdt, vm_offset_t b02, int paint)
+ {
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
 @@ -3467,6 +3467,29 @@
  	 */
  	(void)gmu_hfi_legacy_messages();
@@ -31,15 +43,3 @@ diff -ru --label a/bsd/dev --label b/bsd/dev a/bsd/dev b/bsd/dev
  	if (1) {
  		printf("adreno: %u: WLOG %u writes:\n", step, wlog_n);
  		for (uint32_t i = 0; i < wlog_n; i++) {
-diff -ru --label a/bsd/dev --label b/bsd/dev a/bsd/dev b/bsd/dev
---- a/bsd/dev
-+++ b/bsd/dev
-@@ -1600,7 +1600,7 @@
- 	printf("POLARIS PREBOOT: thread started (25 s), then it creates the cookie\n");
- }
- 
--static int
-+int
- polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
-     vm_offset_t mdt, vm_offset_t b02, int paint)
- {
