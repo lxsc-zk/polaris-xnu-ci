@@ -1,0 +1,18 @@
+Subject: [PATCH] polaris: keep the GPU running after the dipper bring-up
+
+--- a/bsd/dev/mi8_adreno.c
++++ b/bsd/dev/mi8_adreno.c
+@@ -4399,6 +4399,13 @@
+ mi8_adreno_thread(void *parameter, __unused wait_result_t result)
+ {
+ 	uint32_t last = (uint32_t)(uintptr_t)parameter;
++	/*
++	 * polaris (0394): keep the GPU after the walk. The N-step path exists for bring-up
++	 * debugging and tears the block down when it is done, but on this port every step has
++	 * to leave the GPU usable -- the paint step and the window server come after it.
++	 */
++	mi8_keep = true;
++
+ 
+ 	gmu_last_step = last;
+ 
