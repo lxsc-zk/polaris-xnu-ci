@@ -11,7 +11,7 @@ Subject: [PATCH] polaris: the early hand-off, with its declarations up front
 +static uint64_t gmu_firmware_size;
 +static bool mi8flow_took;
 +static bool mi8flow_tried;
-+static vm_offset_t image_file(const char *dir, const char *name, vm_size_t *size);
++static const uint8_t *image_file(const char *directory, const char *name, uint64_t *size);
 +
  static bool
  step_outside(void)
@@ -27,8 +27,8 @@ Subject: [PATCH] polaris: the early hand-off, with its declarations up front
 +	 */
 +	if (!mi8flow_tried) {
 +		extern int polaris_mi8_flow(vm_offset_t, vm_offset_t, vm_offset_t, vm_offset_t, int);
-+		vm_size_t sqe_size = 0, md_size = 0, b02_size = 0;
-+		vm_offset_t sqe, md, b02;
++		uint64_t sqe_size = 0, md_size = 0, b02_size = 0;
++		const uint8_t *sqe, *md, *b02;
 +
 +		mi8flow_tried = true;
 +		if (gmu_firmware == NULL) {
