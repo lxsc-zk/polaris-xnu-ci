@@ -1,0 +1,12 @@
+Subject: [PATCH] polaris: register mi8_adreno.c in bsd/conf/files
+
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -114,6 +114,7 @@
+ bsd/dev/polaris_touch_diag.c		standard
+ bsd/dev/polaris_touch_i2c.c		standard
+ bsd/dev/polaris_gpu_diag.c		standard
++bsd/dev/mi8_adreno.c		standard
+ bsd/dev/polaris_gpu_power.c		standard
+ bsd/dev/polaris_gpu.c			standard
+ bsd/dev/mem.c				standard
