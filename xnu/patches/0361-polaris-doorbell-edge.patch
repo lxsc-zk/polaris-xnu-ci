@@ -1,0 +1,18 @@
+Subject: [PATCH] polaris: a fresh doorbell edge per message
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3644,6 +3644,13 @@
+ 	}
+ 	queue->write = idx;
+ 	to_memory((vm_offset_t)hfi, 0x4000u);
++	/*
++	 * polaris (0361): the firmware consumes one message per doorbell edge -- it clears the
++	 * write index when it takes one, and with bit 0 left set the next message looks like no
++	 * news at all. Drop the bit and raise it again for this message.
++	 */
++	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 0);
++	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	if (hfi_number <= 2) {
+ 		volatile uint32_t *e = (volatile uint32_t *)hfi + 6;
+ 
