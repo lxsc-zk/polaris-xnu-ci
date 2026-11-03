@@ -1,0 +1,26 @@
+Subject: [PATCH] polaris: mi8gpu means dipper's driver owns the GPU
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -523,7 +523,21 @@
+ 		static bool offered;
+ 
+ 		if (!offered) {
++			uint32_t requested = 0;
++
+ 			offered = true;
++			if (PE_parse_boot_argn("mi8gpu", &requested, sizeof(requested)) && requested != 0) {
++				/*
++				 * polaris (0393): dipper's driver owns the GPU. Start it and mark the
++				 * flow as taken so no GPU step -- and in particular this port's own
++				 * polaris_mi8_flow -- touches the block underneath it.
++				 */
++				printf("adreno: %u: polaris: mi8gpu=%u given; dipper's mi8_adreno owns the "
++				    "GPU, this port's flow stands down\n", step, requested);
++				mi8_adreno_init();
++				mi8flow_took = true;
++				return true;
++			}
+ 			printf("adreno: %u: polaris: offering the GPU to dipper's mi8_adreno driver "
+ 			    "(boot-arg mi8gpu=N drives it)\n", step);
+ 			mi8_adreno_init();
