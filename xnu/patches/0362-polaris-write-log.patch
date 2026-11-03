@@ -1,0 +1,48 @@
+Subject: [PATCH] polaris: log every GMU write made during step 16
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -177,9 +177,26 @@
+ 	return value;
+ }
+ 
++/* polaris (0362): a ring of the GMU writes, for comparing against the working image. */
++#define WLOG_MAX 512
++static uint16_t wlog_off[WLOG_MAX];
++static uint32_t wlog_val[WLOG_MAX];
++static uint32_t wlog_n;
++
++static void
++wlog_note(vm_offset_t address, uint32_t value)
++{
++	if (gmu.base != 0 && address >= gmu.base && address < gmu.base + gmu.size && wlog_n < WLOG_MAX) {
++		wlog_off[wlog_n] = (uint16_t)(address - gmu.base);
++		wlog_val[wlog_n] = value;
++		wlog_n++;
++	}
++}
++
+ static void __attribute__((noinline))
+ wr(vm_offset_t address, uint32_t value)
+ {
++	wlog_note(address, value);
+ 	__asm__ volatile ("str %w0, [%1]" : : "r" (value), "r" (address) : "memory");
+ }
+ 
+@@ -3445,6 +3462,16 @@
+ 	 */
+ 	(void)gmu_hfi_legacy_messages();
+ 	(void)gmu_rail_before_hfi();
++	if (1) {
++		printf("adreno: %u: WLOG %u writes:\n", step, wlog_n);
++		for (uint32_t i = 0; i < wlog_n; i++) {
++			printf("  %#06x=%#x", wlog_off[i], wlog_val[i]);
++			if ((i + 1u) % 6u == 0u) {
++				printf("\n");
++			}
++		}
++		printf("\n");
++	}
+ 	return !space_faulted(&gmu_space);
+ }
+ 
