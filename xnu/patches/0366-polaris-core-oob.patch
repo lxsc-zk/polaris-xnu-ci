@@ -1,0 +1,20 @@
+Subject: [PATCH] polaris: request 3D-core power with OOB set 16 / ack 24
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3754,8 +3754,13 @@
+ #define RBBM_STATUS             GPU_WORD(0x0210)
+ #define RBBM_CLOCK_CNTL         GPU_WORD(0x00ae)
+ #define CP_RB_BASE              GPU_WORD(0x0800)
+-#define GMU_CORE_REQUEST        (1u << 30)      /* of host2gmu_intr_set: keep the 3D core up for us; bit 31: no more */
+-#define GMU_CORE_GRANTED        (1u << 31)      /* of gmu2host_intr_info */
++/*
++ * polaris (0366): the bring-up powers the 3D core with OOB set 16 / ack 24 --
++ * GPU-BRINGUP-DONE.md records "POLARIS GX: oob set 16 ack 24 -> ACKED". Bits 30/31 are the
++ * power-off pair, which is why this step asked and then waited for a grant that cannot come.
++ */
++#define GMU_CORE_REQUEST        (1u << 16)      /* of host2gmu_intr_set: keep the 3D core up for us */
++#define GMU_CORE_GRANTED        (1u << 24)      /* of gmu2host_intr_info */
+ 
+ static uint32_t core_khz;               /* the 3D core's speed, as asked of the GMU */
+ 
