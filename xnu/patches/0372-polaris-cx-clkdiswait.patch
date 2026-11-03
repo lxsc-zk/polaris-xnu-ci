@@ -1,0 +1,29 @@
+Subject: [PATCH] polaris: CX power-up with clk-dis-wait = 8, as the working image does
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -607,12 +607,19 @@
+ 		return false;
+ 	}
+ 	/*
+-	 * polaris: 0326 wrote clk-dis-wait = 8 first, the way mi8flow.inc does -- but that
+-	 * image only touches 0x106c at all when its bit 31 is clear, and here writing it
+-	 * left CX off for twenty seconds (the skip run never got past step 4). Back to the
+-	 * single collapse-clearing write.
++	 * polaris (0372): the working image's three steps, in its order --
++	 *   clk-dis-wait = 8, then clear the collapse bit, then judge by 0x1540 bit 31.
++	 * 0326 wrote the first of these while this driver still judged CX by 0x106c bit 31, so
++	 * the switch looked off forever and the write was reverted with the criterion. The
++	 * criterion is right now (0328); put the write back.
+ 	 */
+-	put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, gdscr & ~GDSC_SW_COLLAPSE);
++	if (!(gdscr & GDSC_POWER_ON)) {
++		put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, (gdscr & ~(0xfu << 12)) | (8u << 12));
++		gdscr = rd(gpucc.base + GPUCC_CX_GDSCR);
++		put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, gdscr & ~GDSC_SW_COLLAPSE);
++	} else {
++		put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, gdscr & ~GDSC_SW_COLLAPSE);
++	}
+ 	for (int i = 0; i < 500 && !cx_is_on(); i++) {
+ 		sleep_us(100);
+ 	}
