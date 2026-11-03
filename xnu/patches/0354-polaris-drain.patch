@@ -1,0 +1,39 @@
+Subject: [PATCH] polaris: drain queue 1 on every pass of the wait loop
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3522,9 +3522,6 @@
+ 			break;
+ 		}
+ 	}
+-	if (which == 1) {
+-		pol_dump_queue("1 after the read", (volatile uint32_t *)hfi + 18);
+-	}
+ 	return answered;
+ }
+ 
+@@ -3603,8 +3600,6 @@
+ 	snprintf(last_write, sizeof(last_write), "step %u sent the GMU message %u (%s)", step, id, what);
+ 	hold(true);
+ 	if (hfi_number == 1) {
+-		pol_dump_queue("0 (ours)", (volatile uint32_t *)hfi + 6);
+-		pol_dump_queue("1 (answers)", (volatile uint32_t *)hfi + 18);
+ 		printf("adreno: %u: HFI probe: queue0.start=%#x data=%#llx table=%#llx write idx=%u status=%u type=%#x\n",
+ 		    step, queue->start, (unsigned long long)(vm_offset_t)data,
+ 		    (unsigned long long)(vm_offset_t)hfi, queue->write, queue->status, queue->type);
+@@ -3643,6 +3638,15 @@
+ 	for (int i = 0; i < 100000 && !answered; i++) {
+ 		sleep_us(20);
+ 		/*
++		 * polaris: an answer may already be waiting -- the firmware posts two at once, and
++		 * only the first was announced by the interrupt we cleared. Read the queue on every
++		 * pass, as polaris_hfi_xfer does, so a queued answer is not skipped.
++		 */
++		answered = hfi_receive(1, number, &verdict);
++		if (answered) {
++			break;
++		}
++		/*
+ 		 * polaris: the firmware did not act on the first doorbell -- in the bring-up the
+ 		 * same five words were answered off it in 25 polls. Ring it again every 5 ms; a
+ 		 * repeated set bit is harmless and is what a tight poll loop amounts to.
