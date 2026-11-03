@@ -1,0 +1,62 @@
+Subject: [PATCH] polaris: hand the bring-up to polaris_mi8_flow while the GMU is in reset
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1846,6 +1846,7 @@
+ static bool legacy_sent;        /* the legacy five have gone out: no a6xx/Linux messages after them */
+ static uint32_t legacy_mask;    /* which of the five the GMU took */
+ static bool hfi_table_set;      /* the working space built the table: step 15 must not rebuild it */
++static bool mi8flow_took;       /* polaris_mi8_flow brought the GPU up: later steps stand aside */
+ /* polaris: twelve words of a queue header, to read the layout off rather than assume it. */
+ static void
+ pol_dump_queue(const char *what, volatile uint32_t *q)
+@@ -1872,6 +1873,38 @@
+ static bool
+ step_gmu_space(void)
+ {
++	/*
++	 * polaris (0371): hand the whole bring-up to polaris_mi8_flow while the GMU is still in
++	 * reset -- that is the one implementation on this hardware that gets the GPU_SET grant
++	 * (OOB 16/24) and goes on to G3D, CP, ZAP and a painted frame.
++	 */
++	{
++		extern int polaris_mi8_flow(vm_offset_t, vm_offset_t, vm_offset_t, vm_offset_t, int);
++		vm_size_t sqe_size = 0, md_size = 0, b02_size = 0;
++		vm_offset_t sqe = image_file("fw", "a630_sqe.fw", &sqe_size);
++		vm_offset_t md = image_file("fw", "a630_zap.mdt", &md_size);
++		vm_offset_t b02 = image_file("fw", "a630_zap.b02", &b02_size);
++
++		if (sqe && md && b02 && gmu_firmware != NULL) {
++			printf("adreno: %u: polaris: handing the bring-up to polaris_mi8_flow "
++			    "(sqe %lu, mdt %lu, b02 %lu)\n", step, (unsigned long)sqe_size,
++			    (unsigned long)md_size, (unsigned long)b02_size);
++			if (polaris_mi8_flow((vm_offset_t)gmu_firmware, sqe, md, b02, 0) == 0) {
++				mi8flow_took = true;
++				gmu_runs = true;
++				gmu_talks = true;
++				gmu_space_is_on = true;
++				core_is_on = true;
++				printf("adreno: %u: polaris: polaris_mi8_flow took the GPU up; the remaining "
++				    "GPU steps stand aside\n", step);
++				return true;
++			}
++			printf("adreno: %u: polaris: polaris_mi8_flow did not take; continuing step by step\n", step);
++		} else {
++			printf("adreno: %u: polaris: blobs missing (sqe %d mdt %d b02 %d fw %d)\n", step,
++			    sqe != 0, md != 0, b02 != 0, gmu_firmware != NULL);
++		}
++	}
+ 	if (!cx_ready()) {
+ 		return false;
+ 	}
+@@ -3362,6 +3395,10 @@
+ static bool
+ step_gmu_queues(void)
+ {
++	if (mi8flow_took) {
++		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
++		return true;
++	}
+ 	if (!cx_ready() || !gmu_runs) {
+ 		return false;
+ 	}
