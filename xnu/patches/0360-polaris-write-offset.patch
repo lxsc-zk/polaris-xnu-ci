@@ -1,0 +1,33 @@
+Subject: [PATCH] polaris: find where the write index really lands in queue 0
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3633,8 +3633,28 @@
+ 		data[idx] = k < words ? message[k] : 0xfafafafau;
+ 		idx = (idx + 1u) & (HFI_QUEUE_WORDS - 1u);
+ 	}
++	if (hfi_number <= 2) {
++		volatile uint32_t *e = (volatile uint32_t *)hfi + 6;
++
++		printf("adreno: %u: q0 before store (number %u, idx %u):", step, number, idx);
++		for (int i = 0; i < 12; i++) {
++			printf(" %#x", e[i]);
++		}
++		printf("\n");
++	}
+ 	queue->write = idx;
+ 	to_memory((vm_offset_t)hfi, 0x4000u);
++	if (hfi_number <= 2) {
++		volatile uint32_t *e = (volatile uint32_t *)hfi + 6;
++
++		printf("adreno: %u: q0 after store:", step);
++		for (int i = 0; i < 12; i++) {
++			printf(" %#x", e[i]);
++		}
++		printf("\n");
++		printf("adreno: %u: candidates +38=%#x +3c=%#x +40=%#x +44=%#x +48=%#x (wanted %#x at +44)\n", step,
++		    e[8], e[9], e[10], e[11], *(volatile uint32_t *)((vm_offset_t)hfi + 0x48u), idx);
++	}
+ 	wr(gmu.base + GMU_HOST2GMU_INTR_SET, 1);
+ 	__asm__ __volatile__("dsb sy" ::: "memory");
+ 	for (k = 0; k < 2000000u; k++) {
