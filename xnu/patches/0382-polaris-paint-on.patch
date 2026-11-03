@@ -1,0 +1,18 @@
+Subject: [PATCH] polaris: pass paint = 1 so the frame buffer fill runs
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1900,7 +1900,12 @@
+ 			printf("adreno: %u: polaris: handing the bring-up to polaris_mi8_flow "
+ 			    "(sqe %lu, mdt %lu, b02 %lu)\n", step, (unsigned long)sqe_size,
+ 			    (unsigned long)md_size, (unsigned long)b02_size);
+-			if (polaris_mi8_flow((vm_offset_t)gmu_firmware, sqe, md, b02, 0) == 0) {
++			/*
++			 * polaris (0382): paint = 1. polaris_g3d_paint() maps the panel frame
++			 * buffer at IOVA 0x20000000 and fills it through CP_MEM_WRITE; the recorded
++			 * painting image ran the same function with this flag set.
++			 */
++			if (polaris_mi8_flow((vm_offset_t)gmu_firmware, sqe, md, b02, 1) == 0) {
+ 				mi8flow_took = true;
+ 				gmu_runs = true;
+ 				gmu_talks = true;
