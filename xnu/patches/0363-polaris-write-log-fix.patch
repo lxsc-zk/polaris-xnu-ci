@@ -1,0 +1,29 @@
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -182,12 +182,14 @@
+ static uint16_t wlog_off[WLOG_MAX];
+ static uint32_t wlog_val[WLOG_MAX];
+ static uint32_t wlog_n;
++static vm_offset_t wlog_base;
++static uint32_t wlog_size;
+ 
+ static void
+ wlog_note(vm_offset_t address, uint32_t value)
+ {
+-	if (gmu.base != 0 && address >= gmu.base && address < gmu.base + gmu.size && wlog_n < WLOG_MAX) {
+-		wlog_off[wlog_n] = (uint16_t)(address - gmu.base);
++	if (wlog_size != 0 && address >= wlog_base && address < wlog_base + wlog_size && wlog_n < WLOG_MAX) {
++		wlog_off[wlog_n] = (uint16_t)(address - wlog_base);
+ 		wlog_val[wlog_n] = value;
+ 		wlog_n++;
+ 	}
+@@ -3368,6 +3370,9 @@
+ 	 * image records HFI6 id=0..5 err=0 first and "rail idx gx=3 mx=3" afterwards; with the
+ 	 * rail up front the firmware answers INIT and then goes silent.
+ 	 */
++	wlog_base = gmu.base;           /* polaris (0363): record every GMU write from here */
++	wlog_size = gmu.size;
++	wlog_n = 0;
+ 	announce("enable the GPU's part of the always-on sequencer and give the GMU's RPMh channel its program");
+ 	if (skip_rsc_table) {
+ 		printf("adreno: %u: adreno_skip_rsc=1: leaving the RSCC/PDC sequence table alone here too\n", step);
