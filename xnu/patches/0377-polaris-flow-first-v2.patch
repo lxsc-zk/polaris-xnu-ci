@@ -1,8 +1,22 @@
-Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clean state
+Subject: [PATCH] polaris: the early hand-off, with its declarations up front
 
 --- a/bsd/dev/hakios.adreno.c
 +++ b/bsd/dev/hakios.adreno.c
-@@ -505,6 +505,43 @@
+@@ -404,6 +404,13 @@
+ 	printf("adreno: %u: RPMh has \"%s\" at %#x; levels:%s\n", step, name, address, levels);
+ }
+ 
++/* polaris (0377): declared here because the hand-off runs before the definitions below. */
++static const uint8_t *gmu_firmware;
++static uint64_t gmu_firmware_size;
++static bool mi8flow_took;
++static bool mi8flow_tried;
++static vm_offset_t image_file(const char *dir, const char *name, vm_size_t *size);
++
+ static bool
+ step_outside(void)
+ {
+@@ -505,6 +512,43 @@
  static bool
  step_gpucc(void)
  {
@@ -46,7 +60,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  	announce("make sure the clock of the GPU clock controller's registers runs (gcc_gpu_cfg_ahb)");
  	if ((set(&gcc, "gpu_cfg_ahb", GCC_GPU_CFG_AHB_CBCR, CBCR_ENABLE) & CBCR_OFF) &&
  	    !wait_for(&gcc, GCC_GPU_CFG_AHB_CBCR, CBCR_OFF, 0, 10)) {
-@@ -579,6 +616,9 @@
+@@ -579,6 +623,9 @@
  static bool
  step_cx_power(void)
  {
@@ -56,7 +70,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  	uint32_t gdscr;
  
  	if (!gpucc_answers()) {
-@@ -692,6 +732,9 @@
+@@ -692,6 +739,9 @@
  static bool
  step_clocks(void)
  {
@@ -66,7 +80,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  	if (!gpucc_answers()) {
  		return false;
  	}
-@@ -1097,6 +1140,9 @@
+@@ -1097,6 +1147,9 @@
  static bool
  step_rscc(void)
  {
@@ -76,7 +90,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  	if (!cx_ready()) {
  		return false;
  	}
-@@ -1188,6 +1234,9 @@
+@@ -1188,6 +1241,9 @@
  static bool
  step_smmu_context(void)
  {
@@ -86,7 +100,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  	uint32_t context;
  
  	if (!cx_ready()) {
-@@ -1216,6 +1265,9 @@
+@@ -1216,6 +1272,9 @@
  static bool
  step_gmu_memory(void)
  {
@@ -96,15 +110,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  	static const uint32_t pattern[2] = { 0x600d0001, 0x0a110002 };
  	uint32_t was[2], back[2];
  
-@@ -1854,6 +1906,7 @@
- static uint32_t legacy_mask;    /* which of the five the GMU took */
- static bool hfi_table_set;      /* the working space built the table: step 15 must not rebuild it */
- static bool mi8flow_took;       /* polaris_mi8_flow brought the GPU up: later steps stand aside */
-+static bool mi8flow_tried;      /* the hand-off has been attempted exactly once */
- /* polaris: twelve words of a queue header, to read the layout off rather than assume it. */
- static void
- pol_dump_queue(const char *what, volatile uint32_t *q)
-@@ -1880,6 +1933,9 @@
+@@ -1880,6 +1939,9 @@
  static bool
  step_gmu_space(void)
  {
@@ -114,7 +120,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  	/*
  	 * polaris (0371): hand the whole bring-up to polaris_mi8_flow while the GMU is still in
  	 * reset -- that is the one implementation on this hardware that gets the GPU_SET grant
-@@ -2071,6 +2127,9 @@
+@@ -2071,6 +2133,9 @@
  step_gmu_firmware(void)
  {
  	if (mi8flow_took) {
@@ -124,7 +130,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
  		return true;
  	}
-@@ -2212,6 +2271,9 @@
+@@ -2212,6 +2277,9 @@
  step_gmu_start(void)
  {
  	if (mi8flow_took) {
@@ -134,7 +140,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
  		return true;
  	}
-@@ -3415,6 +3477,9 @@
+@@ -3415,6 +3483,9 @@
  step_gmu_queues(void)
  {
  	if (mi8flow_took) {
@@ -144,7 +150,7 @@ Subject: [PATCH] polaris: polaris_mi8_flow runs first, from the diag path's clea
  		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
  		return true;
  	}
-@@ -3854,6 +3919,9 @@
+@@ -3854,6 +3925,9 @@
  static bool
  step_core_power(void)
  {
