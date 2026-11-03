@@ -1,0 +1,38 @@
+Subject: [PATCH] polaris: three CPU-written bars to test the frame buffer address
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1905,7 +1905,32 @@
+ 			 * buffer at IOVA 0x20000000 and fills it through CP_MEM_WRITE; the recorded
+ 			 * painting image ran the same function with this flag set.
+ 			 */
+-			if (polaris_mi8_flow((vm_offset_t)gmu_firmware, sqe, md, b02, 1) == 0) {
++			int flow_rc = polaris_mi8_flow((vm_offset_t)gmu_firmware, sqe, md, b02, 1);
++
++			/*
++			 * polaris (0383): three bars written by this processor, at the address the
++			 * CP fill used. Bars appearing means the address is the panel's and only the
++			 * CP's memory write fails; nothing means the display shows another buffer.
++			 */
++			{
++				static const uint32_t bars[3] = { 0xffff0000u, 0xff00ff00u, 0xff0000ffu };
++				vm_offset_t fb = ml_io_map(0x9d400000ull, 0x2000000ull);
++
++				if (fb) {
++					for (uint32_t row = 200; row < 320u; row++) {
++						for (uint32_t col = 0; col < 1080u; col++) {
++							*(volatile uint32_t *)(fb + (uint64_t)row * 4320ull +
++							    (uint64_t)col * 4ull) = bars[col / 360u];
++						}
++					}
++					__asm__ __volatile__("dsb sy" ::: "memory");
++					printf("adreno: %u: polaris: CPU wrote three bars at fb 0x9d400000 "
++					    "(rows 200-320); the flow returned %d\n", step, flow_rc);
++				} else {
++					printf("adreno: %u: polaris: the frame buffer would not map\n", step);
++				}
++			}
++			if (flow_rc == 0) {
+ 				mi8flow_took = true;
+ 				gmu_runs = true;
+ 				gmu_talks = true;
