@@ -1,0 +1,29 @@
+Subject: [PATCH] polaris: ask for the GX rail grant before the 3D core
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3851,6 +3851,24 @@
+ 	}
+ 
+ gpu_set:
++	/*
++	 * polaris (0367): the GX rail grant comes first. The bring-up's log has
++	 * "oob set 22 ack 30 -> ACKED" and only then "oob set 16 ack 24 -> ACKED"; asking for the
++	 * core without it leaves rpmh_power_state at 0 and the 16/24 grant never arrives.
++	 */
++	{
++		uint32_t rail_grant = 0;
++
++		put(&gmu, "host2gmu_intr_set", GMU_HOST2GMU_INTR_SET, 1u << 22);
++		for (int i = 0; i < 5000 && !(rail_grant & (1u << 30)); i++) {
++			sleep_us(100);
++			rail_grant = rd(gmu.base + GMU_GMU2HOST_INTR_INFO);
++		}
++		put(&gmu, "gmu2host_intr_clr", GMU_GMU2HOST_INTR_CLR, 1u << 30);
++		printf("adreno: %u: polaris: rail grant: set 22 -> ack 30 %s (info %#x, rpmh %#x)\n", step,
++		    (rail_grant & (1u << 30)) ? "ACKED" : "TIMEOUT", rail_grant,
++		    rd(gmu.base + GMU_RPMH_POWER_STATE));
++	}
+ 	announce("ask the GMU to power the 3D core and keep it powered");
+ 	get(&gmu, "sptprac_pwr_clk_status", GMU_SPTPRAC_PWR_CLK_STATUS);
+ 	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
