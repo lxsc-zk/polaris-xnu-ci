@@ -1,0 +1,29 @@
+Subject: [PATCH] polaris: look at the firmware right after it accepts INIT
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2769,6 +2769,24 @@
+ 	ok = hfi_send("the legacy INIT", 0, m, 5);
+ 	mask |= (ok ? 1u : 0u) << 0;
+ 	printf("adreno: %u: polaris: legacy message 0 (INIT): %s\n", step, ok ? "accepted" : "refused");
++	/*
++	 * polaris (0359): the firmware accepts INIT and then goes silent. Look at it right here,
++	 * while nothing else has happened: is it still alive (ctrl status, fw init), did it write
++	 * anything into its own log page, and what does queue 0's header hold now?
++	 */
++	{
++		volatile uint32_t *log_page = (volatile uint32_t *)((vm_offset_t)hfi - 0x4000u);
++		volatile uint32_t *q = (volatile uint32_t *)hfi + 6;
++
++		printf("adreno: %u: post-INIT: hfi_ctrl_status=%#x version=%#x sptprac=%#x intr_info=%#x "
++		    "fw_init=%#x q0[s/w/r]=%#x/%#x/%#x\n", step,
++		    rd(gmu.base + GMU_HFI_CTRL_STATUS), rd(gmu.base + GMU_HFI_VERSION_INFO),
++		    rd(gmu.base + GMU_SPTPRAC_PWR_CLK_STATUS), rd(gmu.base + GMU_GMU2HOST_INTR_INFO),
++		    rd(gmu.base + GMU_CM3_FW_INIT_RESULT), q[0], q[11], q[10]);
++		printf("adreno: %u: post-INIT log page: %#x %#x %#x %#x %#x %#x %#x %#x\n", step,
++		    log_page[0], log_page[1], log_page[2], log_page[3],
++		    log_page[4], log_page[5], log_page[6], log_page[7]);
++	}
+ 	for (unsigned i = 0; i < 160; i++) {
+ 		m[i] = 0;
+ 	}
