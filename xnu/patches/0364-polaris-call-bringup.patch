@@ -1,0 +1,45 @@
+diff -ru --label a/bsd/dev --label b/bsd/dev a/bsd/dev b/bsd/dev
+--- a/bsd/dev
++++ b/bsd/dev
+@@ -3467,6 +3467,29 @@
+ 	 */
+ 	(void)gmu_hfi_legacy_messages();
+ 	(void)gmu_rail_before_hfi();
++	/*
++	 * polaris (0364): rather than re-deriving the rest message by message, hand the work to
++	 * the bring-up function that already does it in this kernel -- polaris_mi8_flow answers
++	 * all six messages, brings up G3D, CP and ZAP, and paints. It is handed the same blobs.
++	 */
++	{
++		extern int polaris_mi8_flow(vm_offset_t, vm_offset_t, vm_offset_t, vm_offset_t, int);
++		vm_size_t sqe_size = 0, md_size = 0, b02_size = 0;
++		vm_offset_t sqe = image_file("fw", "a630_sqe.fw", &sqe_size);
++		vm_offset_t md = image_file("fw", "a630_zap.mdt", &md_size);
++		vm_offset_t b02 = image_file("fw", "a630_zap.b02", &b02_size);
++
++		if (sqe && md && b02 && sqe_size && md_size) {
++			printf("adreno: %u: polaris: handing the rest to polaris_mi8_flow "
++			    "(sqe %lu bytes, mdt %lu, b02 %lu)\n", step,
++			    (unsigned long)sqe_size, (unsigned long)md_size, (unsigned long)b02_size);
++			polaris_mi8_flow((vm_offset_t)gmu_firmware, sqe, md, b02, 0);
++			printf("adreno: %u: polaris: polaris_mi8_flow returned\n", step);
++		} else {
++			printf("adreno: %u: polaris: blobs missing (sqe=%d mdt=%d b02=%d); staying with the "
++			    "step-by-step path\n", step, sqe != 0, md != 0, b02 != 0);
++		}
++	}
+ 	if (1) {
+ 		printf("adreno: %u: WLOG %u writes:\n", step, wlog_n);
+ 		for (uint32_t i = 0; i < wlog_n; i++) {
+diff -ru --label a/bsd/dev --label b/bsd/dev a/bsd/dev b/bsd/dev
+--- a/bsd/dev
++++ b/bsd/dev
+@@ -1600,7 +1600,7 @@
+ 	printf("POLARIS PREBOOT: thread started (25 s), then it creates the cookie\n");
+ }
+ 
+-static int
++int
+ polaris_mi8_flow(vm_offset_t fw, vm_offset_t sqe,
+     vm_offset_t mdt, vm_offset_t b02, int paint)
+ {
