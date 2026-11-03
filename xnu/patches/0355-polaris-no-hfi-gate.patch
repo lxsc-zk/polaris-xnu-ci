@@ -1,0 +1,23 @@
+Subject: [PATCH] polaris: send the legacy five without gating on answers
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2839,10 +2839,15 @@
+ 	}
+ 	printf("adreno: %u: polaris: legacy five: INIT=%u FW_VERSION=%u PERF=%u BW=%u TEST=%u -> %s\n", step,
+ 	    (mask >> 0) & 1u, (mask >> 1) & 1u, (mask >> 4) & 1u, (mask >> 3) & 1u, (mask >> 5) & 1u,
+-	    ok ? "all accepted" : "SOMETHING REFUSED");
+-	legacy_sent = ok;
++	    ok ? "all accepted" : "some refused (sent anyway, as the working image does)");
++	/*
++	 * polaris: the working image discards these results and walks on to the rail, GPU_SET,
++	 * G3D init, CP and ZAP. Gate nothing here: five messages went out, that is what step 17
++	 * needs to know.
++	 */
++	legacy_sent = true;
+ 	legacy_mask = mask;
+-	return ok;
++	return true;
+ }
+ 
+ /*
