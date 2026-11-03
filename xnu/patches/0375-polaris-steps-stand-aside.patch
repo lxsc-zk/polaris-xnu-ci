@@ -1,0 +1,26 @@
+Subject: [PATCH] polaris: steps 14 and 15 stand aside when the flow took the GPU up
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -2066,6 +2066,10 @@
+ static bool
+ step_gmu_firmware(void)
+ {
++	if (mi8flow_took) {
++		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
++		return true;
++	}
+ 	uint32_t wrong = 0;
+ 
+ 	if (!cx_ready() || gmu_firmware == NULL) {
+@@ -2203,6 +2207,10 @@
+ static bool
+ step_gmu_start(void)
+ {
++	if (mi8flow_took) {
++		printf("adreno: %u: polaris_mi8_flow already brought the GPU up; not repeating this step\n", step);
++		return true;
++	}
+ 	static const uint8_t priority[HFI_QUEUES] = { 10, 10, 40 };
+ 	uint32_t result = 0;
+ 
