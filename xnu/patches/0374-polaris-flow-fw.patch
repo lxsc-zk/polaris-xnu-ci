@@ -1,0 +1,15 @@
+Subject: [PATCH] polaris: load the GMU firmware inside the mi8flow hook
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -1892,6 +1892,10 @@
+ 		vm_offset_t md = image_file("fw", "a630_zap.mdt", &md_size);
+ 		vm_offset_t b02 = image_file("fw", "a630_zap.b02", &b02_size);
+ 
++		if (gmu_firmware == NULL) {
++			/* step 13 assigns this further down; the hook runs before that */
++			gmu_firmware = image_file("fw", "a660_gmu.bin", &gmu_firmware_size);
++		}
+ 		if (sqe && md && b02 && gmu_firmware != NULL) {
+ 			printf("adreno: %u: polaris: handing the bring-up to polaris_mi8_flow "
+ 			    "(sqe %lu, mdt %lu, b02 %lu)\n", step, (unsigned long)sqe_size,
