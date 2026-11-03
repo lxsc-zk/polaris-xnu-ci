@@ -1,0 +1,30 @@
+Subject: [PATCH] polaris: vote the rail after the five messages, as the working image does
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3329,9 +3329,10 @@
+ 		return false;
+ 	}
+ 	/*
+-	 * polaris: the rail first -- the working image brings GX up before HFI, not after.
++	 * polaris (0358): the rail is voted *after* the five messages, not before. The working
++	 * image records HFI6 id=0..5 err=0 first and "rail idx gx=3 mx=3" afterwards; with the
++	 * rail up front the firmware answers INIT and then goes silent.
+ 	 */
+-	(void)gmu_rail_before_hfi();
+ 	announce("enable the GPU's part of the always-on sequencer and give the GMU's RPMh channel its program");
+ 	if (skip_rsc_table) {
+ 		printf("adreno: %u: adreno_skip_rsc=1: leaving the RSCC/PDC sequence table alone here too\n", step);
+@@ -3421,9 +3422,11 @@
+ 	gmu_talks = true;
+ 	printf("adreno: %u: THE GMU'S MESSAGE QUEUES ARE UP\n", step);
+ 	/*
+-	 * polaris: the legacy firmware wants its five messages now, not in step 17.
++	 * polaris: the legacy firmware wants its five messages now, not in step 17 -- and the
++	 * rail only after them, exactly as the working image's log has it.
+ 	 */
+ 	(void)gmu_hfi_legacy_messages();
++	(void)gmu_rail_before_hfi();
+ 	return !space_faulted(&gmu_space);
+ }
+ 
