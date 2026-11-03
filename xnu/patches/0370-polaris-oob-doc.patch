@@ -1,0 +1,32 @@
+Subject: [PATCH] polaris: the OOB sequence exactly as the bring-up documents record it
+
+--- a/bsd/dev/hakios.adreno.c
++++ b/bsd/dev/hakios.adreno.c
+@@ -3859,6 +3859,14 @@
+ 	{
+ 		uint32_t rail_grant = 0;
+ 
++		/*
++		 * polaris (0370): BOOT_SLUMBER_OPTION = 0 (power up), then the two rail indices,
++		 * before asking -- a6xx_gfx_rail_on()'s order; 3 is the index this port measured.
++		 */
++		wr(gmu.base + 0x8fe0u, 0);
++		wr(gmu.base + 0x8fe4u, 3u);
++		wr(gmu.base + 0x8fe8u, 3u);
++		__asm__ __volatile__("dsb sy" ::: "memory");
+ 		put(&gmu, "host2gmu_intr_set", GMU_HOST2GMU_INTR_SET, 1u << 22);
+ 		for (int i = 0; i < 5000 && !(rail_grant & (1u << 30)); i++) {
+ 			sleep_us(100);
+@@ -3893,7 +3901,11 @@
+ 		granted = rd(gmu.base + GMU_GMU2HOST_INTR_INFO);
+ 	}
+ 	core_is_on = true;                      /* asked for, at least: to be given back */
+-	put(&gmu, "gmu2host_intr_clr", GMU_GMU2HOST_INTR_CLR, GMU_CORE_GRANTED);
++	/*
++	 * polaris (0370): the bring-up clears both bits in one write --
++	 * 0x507e644 = (1<<24) | (1<<30) -- not 24 alone.
++	 */
++	put(&gmu, "gmu2host_intr_clr", GMU_GMU2HOST_INTR_CLR, (1u << 24) | (1u << 30));
+ 	get(&gmu, "sptprac_pwr_clk_status", GMU_SPTPRAC_PWR_CLK_STATUS);
+ 	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
+ 	get(&gmu, "rpmh_power_state", GMU_RPMH_POWER_STATE);
