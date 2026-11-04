@@ -5,8 +5,8 @@ name: unixnu-kernel
 # back as an artifact. Everything else (fetch/tree/package/payload/bootimg)
 # runs locally in WSL.
 #
-# Triggered by a push to this branch (workflow_dispatch additionally works once
-# the file lives on the default branch).
+# v2: adds an instrumented bootstrap pass (`bash -x`) so the first failure is
+# reported with its exact command and exit status instead of a bare rc=1.
 
 on:
   push:
@@ -24,6 +24,7 @@ jobs:
     steps:
       - name: Report toolchain
         run: |
+          set -x
           uname -a
           sw_vers
           xcodebuild -version
@@ -31,7 +32,9 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version || true
           python3 --version
           cmake --version | head -1 || echo 'cmake MISSING'
-          perl -v | head -2
+          for t in ninja unifdef ditto lipo; do printf '%s: ' "$t"; command -v "$t" || echo MISSING; done
+          ls /opt/homebrew/opt/llvm/bin 2>/dev/null | head -5 || true
+          ls /opt/homebrew/opt/lld/bin 2>/dev/null | head -5 || true
 
       - name: Fetch UniXNU and the polaris device repository
         run: |
@@ -48,7 +51,23 @@ jobs:
           ./unixnu defconfig polaris_defconfig -D ../polaris
           ./unixnu fetch -D ../polaris
           ./unixnu tree -D ../polaris
-          ./unixnu status -D ../polaris | head -40
+
+      - name: Instrumented bootstrap pass (diagnostic)
+        continue-on-error: true
+        run: |
+          set -x
+          cd UniXNU/out/polaris/tree
+          export PATH="/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:$PATH"
+          export JOBS=8 XNU_BOOT_PROGRESS=0
+          set +e
+          bash -x scripts/build-xnu-4k-baseline.sh > /tmp/bootstrap-x.log 2>&1
+          rc=$?
+          echo "BOOTSTRAP_RC=$rc"
+          echo '--- last 120 lines of bash -x ---'
+          tail -120 /tmp/bootstrap-x.log
+          echo '--- first failing command (heuristic) ---'
+          grep -n '^+' /tmp/bootstrap-x.log | tail -15
+          exit 0
 
       - name: Build kernel
         run: |
@@ -60,7 +79,7 @@ jobs:
         if: always()
         run: |
           set -x
-          find UniXNU/out/polaris -maxdepth 3 -type f \( -name '*.macho' -o -name '*.json' -o -name '*.log' \) -print -exec ls -l {} \; | head -60
+          find UniXNU/out/polaris -maxdepth 3 -type f \( -name '*.macho' -o -name '*.json' -o -name '*.log' \) -print | head -40
 
       - name: Upload kernel artifacts
         if: always()
@@ -70,4 +89,5 @@ jobs:
           path: |
             UniXNU/out/polaris/kernel/**
             UniXNU/out/polaris/logs/**
+            /tmp/bootstrap-x.log
           if-no-files-found: warn
