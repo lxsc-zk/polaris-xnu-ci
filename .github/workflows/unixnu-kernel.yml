@@ -78,6 +78,17 @@ jobs:
           print('patched', p)
           PY
           grep -n 'GITHUB_TOKEN' UniXNU/scripts/prepare-xnu-source.py
+          python3 - <<'PY2'
+          from pathlib import Path
+          p = Path('UniXNU/scripts/unixnu/kernel.py')
+          s = p.read_text()
+          old = 'run([\u0027bash\u0027, script]'
+          new = 'run([\u0027bash\u0027, \u0027-x\u0027, script]'
+          assert old in s, 'kernel.py: anchor not found'
+          p.write_text(s.replace(old, new))
+          print('kernel.py now traces the build script under bash -x')
+          PY2
+          grep -n 'bash.*-x.*script' UniXNU/scripts/unixnu/kernel.py
 
       - name: Build kernel
         env:
