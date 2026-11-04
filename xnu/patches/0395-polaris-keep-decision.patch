@@ -1,0 +1,14 @@
+Subject: [PATCH] polaris: print the four flags of the keep decision
+
+--- a/bsd/dev/mi8_adreno.c
++++ b/bsd/dev/mi8_adreno.c
+@@ -4014,6 +4014,9 @@
+ 				sleep_us(1000);
+ 				gmu_power_look("after GPU_SET and BOOT_SLUMBER cleared");
+ 				rail_ok = gpu_set;
++				/* polaris (0395): which of the four blocks the keep path */
++				printf("mi8gpu: keep decision: mi8_keep=%d gpu_set=%d cp_ok=%d "
++				    "gpu_nonsecure=%d\n", mi8_keep, gpu_set, cp_ok, gpu_nonsecure);
+ 				if (mi8_keep && gpu_set && cp_ok && gpu_nonsecure) {
+ 					/* nothing is stopped: the system draws with this GPU from here (gmu_unsafe stays set so that no
+ 					 * teardown frees what the core uses) */
