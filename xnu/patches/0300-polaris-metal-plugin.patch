@@ -1,0 +1,31 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -260,8 +260,27 @@
+ 		IOAcceleratorES * accelerator = OSTypeAlloc(IOAcceleratorES);
+ 
+ 		if (accelerator != NULL && accelerator->init() && accelerator->attach(this)) {
++			/*
++			 * fajita: Metal matches IOServiceMatching("IOAcceleratorES"), reads
++			 * MetalPluginName and MetalPluginClassName, loads that bundle from
++			 * /System/Library/Extensions and hands it the accelerator port. A
++			 * service published without them is found and then ignored - which
++			 * is how this port could sit on an Apple logo with a live GPU.
++			 *
++			 * metalplugin=1 names the real one (SweetBGMTL / BGMTLDevice, which
++			 * talks to /dev/sweetgpu); otherwise a stub that declines is named,
++			 * so a bad plugin is backed out with a boot argument and not a flash.
++			 */
++			uint32_t realPlugin = 0;
++			(void)PE_parse_boot_argn("metalplugin", &realPlugin, sizeof(realPlugin));
++			const char *pluginName  = realPlugin ? "SweetBGMTL" : "SweetMetalProbe";
++			const char *pluginClass = realPlugin ? "BGMTLDevice" : "SweetMetalDevice";
++			bool named = accelerator->setProperty("MetalPluginName", pluginName) &&
++			    accelerator->setProperty("MetalPluginClassName", pluginClass);
++			accelerator->setName("sgx");
+ 			accelerator->registerService();
+-			IOLog("SWEET FB: published a stub IOAcceleratorES\n");
++			IOLog("SWEET FB: IOAcceleratorES published, MetalPluginName %s class %s"
++			    " (properties set: %s)\n", pluginName, pluginClass, named ? "yes" : "NO");
+ 		} else if (accelerator != NULL) {
+ 			accelerator->release();
+ 		} else {
