@@ -90,6 +90,19 @@ jobs:
           PY2
           grep -n 'bash.*-x.*script' UniXNU/scripts/unixnu/kernel.py
 
+      - name: Pre-build corecrypto archives
+        # The XNU build script's bootstrap pass ends with a bare
+        #   test -f build/corecrypto-2023/libcorecrypto_kernel_noasm-namespaced.a
+        # so under `set -e` it exits 1 (silently) unless that archive already
+        # exists. The driver only builds archives *after* the bootstrap pass,
+        # so build them here first (run 41819002275's trace ends exactly there).
+        run: |
+          set -eux
+          cd UniXNU/out/polaris/tree
+          python3 scripts/build-corecrypto-14.py
+          python3 scripts/build-corecrypto-14.py --namespace
+          ls -l build/corecrypto-2023/*.a | head
+
       - name: Build kernel
         env:
           GITHUB_TOKEN: ${{ github.token }}
