@@ -99,6 +99,12 @@ jobs:
         run: |
           set -eux
           cd UniXNU/out/polaris/tree
+          # the driver only links refer/<module> when it builds archives, which
+          # happens after the bootstrap pass; link the feed here first
+          if [ ! -e refer/corecrypto-2023 ]; then
+            ln -sfn "$(ls -d ../../feeds/corecrypto-2023-* | head -1)" refer/corecrypto-2023
+          fi
+          ls -l refer/corecrypto-2023 | head -2
           python3 scripts/build-corecrypto-14.py
           python3 scripts/build-corecrypto-14.py --namespace
           ls -l build/corecrypto-2023/*.a | head
