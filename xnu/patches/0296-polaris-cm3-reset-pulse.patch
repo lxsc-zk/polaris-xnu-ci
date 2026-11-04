@@ -1,0 +1,41 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-04 21:13:45.207568404 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-04 21:13:50.923568404 +0800
+@@ -1448,8 +1448,8 @@
+ space_stream(struct gpu_space *space, uint32_t match, uint32_t stream)
+ {
+ 	put(&smmu, "s2cr", SMMU_S2CR(match), space->context);
+-	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream);
+-	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream) ||
++	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | stream   /* fajita: exact only - a masked entry reads back 0 */);
++	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | stream   /* fajita: exact only - a masked entry reads back 0 */) ||
+ 	    (get(&smmu, "s2cr", SMMU_S2CR(match)) & 0x300ff) != space->context) {
+ 		/*
+ 		 * polaris: the SMMU's global registers belong to the hypervisor on this
+@@ -1493,10 +1493,10 @@
+ 	}
+ 	put(&smmu, "cb sctlr", context + SMMU_CB_SCTLR, SMMU_SCTLR_ON | space->control);
+ 	put(&smmu, "s2cr", SMMU_S2CR(match), space->context);
+-	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream);
++	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | stream   /* fajita: exact only - a masked entry reads back 0 */);
+ 
+ 	/* the global ones are the hypervisor's to grant: see what it made of them */
+-	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream) ||
++	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | stream   /* fajita: exact only - a masked entry reads back 0 */) ||
+ 	    (get(&smmu, "s2cr", SMMU_S2CR(match)) & 0x300ff) != space->context ||
+ 	    (get(&smmu, "cbar", smmu_page + SMMU_CBAR(space->context)) & 0x30000) != (SMMU_CBAR_STAGE_1 & 0x30000) ||
+ 	    !(get(&smmu, "cb sctlr", context + SMMU_CB_SCTLR) & 1) ||
+@@ -2038,6 +2038,14 @@
+ 		printf("adreno: %u: cannot read the CM3's reset state back; configuring it anyway\n", step);
+ 	}
+ 	/*
++	 * fajita, on the same SoC: the working sequence writes SYSRESET = 1, waits, and
++	 * configures before the = 0. On this board the boot loader leaves the CM3
++	 * neither held nor running (the bit reads 0), so a bare write of 0 - what the
++	 * vendor's driver does when it finds the bit already set - does nothing at all.
++	 */
++	put(&gmu, "hold the CM3 in reset", GMU_CM3_SYSRESET, 1);
++	sleep_ms(2);
++	/*
+ 	 * Our own leaving (gpu_block_stop) hands the GMU's RPMh channel to the always-on sequencer, and
+ 	 * until it is taken back nothing the GMU asks of RPMh gets there: the vendor's
+ 	 * a6xx_rscc_wakeup_sequence, before the firmware starts.
