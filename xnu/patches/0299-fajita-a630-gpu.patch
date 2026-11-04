@@ -3947,6 +3947,196 @@ index 0000000..c622b9a
 +sweet_log_panic_flush(void)
 +{
 +}
+diff --git a/bsd/dev/polaris_gpu_stubs.c b/bsd/dev/polaris_gpu_stubs.c
+new file mode 100644
+index 0000000..236f689
+--- /dev/null
++++ b/bsd/dev/polaris_gpu_stubs.c
+@@ -0,0 +1,184 @@
++/*
++ * The polaris bring-up (polaris_gpu_diag.c et al) is retired now that the A630
++ * driver from the fajita port (sweet_gpu.c) drives this GPU. bsd_init.c and the
++ * UFS root path still call its entry points, so they are answered here with
++ * nothing: a boot that means to use the GPU passes adreno=<level>, and the two
++ * must never drive the same block.
++ */
++
++void
++polaris_gpu_arc(void)
++{
++}
++
++void
++polaris_gpu_bcm(void)
++{
++}
++
++void
++polaris_gpu_clock_dump(void)
++{
++}
++
++void
++polaris_gpu_clock_on_probe(void)
++{
++}
++
++void
++polaris_gpu_cmddb(void)
++{
++}
++
++void
++polaris_gpu_diag(void)
++{
++}
++
++void
++polaris_gpu_fence(void)
++{
++}
++
++void
++polaris_gpu_gmu4clk(void)
++{
++}
++
++void
++polaris_gpu_gmu_addr(void)
++{
++}
++
++void
++polaris_gpu_gmu_boot(void)
++{
++}
++
++void
++polaris_gpu_gmu_bytes(void)
++{
++}
++
++void
++polaris_gpu_gmu_clocked(void)
++{
++}
++
++void
++polaris_gpu_gmu_gx(void)
++{
++}
++
++void
++polaris_gpu_gmu_probe(void)
++{
++}
++
++void
++polaris_gpu_gmu_regscan(void)
++{
++}
++
++void
++polaris_gpu_gmu_rsc(void)
++{
++}
++
++void
++polaris_gpu_gmu_window(void)
++{
++}
++
++void
++polaris_gpu_gmu_window2(void)
++{
++}
++
++void
++polaris_gpu_gmu_words(void)
++{
++}
++
++void
++polaris_gpu_gmu_writetest(void)
++{
++}
++
++void
++polaris_gpu_gx_clocks(void)
++{
++}
++
++void
++polaris_gpu_gx_root(void)
++{
++}
++
++void
++polaris_gpu_init(void)
++{
++}
++
++void
++polaris_gpu_power_on_probe(void)
++{
++}
++
++void
++polaris_gpu_power_probe(void)
++{
++}
++
++void
++polaris_gpu_rpmh(void)
++{
++}
++
++void
++polaris_gpu_rpmh2(void)
++{
++}
++
++void
++polaris_gpu_smmu_clocks(void)
++{
++}
++
++void
++polaris_gpu_smmu_combined(void)
++{
++}
++
++void
++polaris_gpu_smmu_minimal(void)
++{
++}
++
++void
++polaris_gpu_smmu_page_tables(void)
++{
++}
++
++void
++polaris_gpu_smmu_probe(void)
++{
++}
++
++void
++polaris_gpu_smmu_streams(void)
++{
++}
++
++void
++polaris_gpu_vrm(void)
++{
++}
++
++/* MiniIOSurface (still built) logs through the hakios glue; keep the line going. */
++void
++loader_log_line(const char *line)
++{
++	printf("%s\n", line != NULL ? line : "");
++}
 diff --git a/iokit/Kernel/arm/SweetAdreno.cpp b/iokit/Kernel/arm/SweetAdreno.cpp
 new file mode 100644
 index 0000000..f12e236
@@ -5351,12 +5541,13 @@ index 0000000..60c8367
 +#endif /* SWEET_ADRENO_ABI_H */
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -105,19 +105,16 @@
+@@ -105,19 +105,17 @@
  
  bsd/dev/memdev.c			standard
  bsd/dev/sweet_ufs.c			standard
 +bsd/dev/sweet_gpu.c			standard
 +bsd/dev/sweet_gpu_logstub.c		standard
++bsd/dev/polaris_gpu_stubs.c		standard
  bsd/dev/sweet_sample.c			standard
  bsd/dev/sweet_keys.c			standard
  bsd/dev/sweet_touch.c			standard
