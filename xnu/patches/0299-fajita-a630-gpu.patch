@@ -3949,10 +3949,12 @@ index 0000000..c622b9a
 +}
 diff --git a/bsd/dev/polaris_gpu_stubs.c b/bsd/dev/polaris_gpu_stubs.c
 new file mode 100644
-index 0000000..236f689
+index 0000000..53ef1f7
 --- /dev/null
 +++ b/bsd/dev/polaris_gpu_stubs.c
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,186 @@
++#include <sys/systm.h>
++
 +/*
 + * The polaris bring-up (polaris_gpu_diag.c et al) is retired now that the A630
 + * driver from the fajita port (sweet_gpu.c) drives this GPU. bsd_init.c and the
