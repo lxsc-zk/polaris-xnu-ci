@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # Pinned, portable constant-time AES for the SWEET legacy CBC/ECB API.
 set -euo pipefail
 [[ "${MACHINE_CONFIG:-}" == SWEET ]] || exit 0
@@ -6,12 +6,34 @@ set -euo pipefail
 bearssl_sha=7bea48e5e850ab4cafbe68d3765cdaba13a86d6f
 bearssl_tmp=$(mktemp -d)
 trap 'rm -rf "$bearssl_tmp"' EXIT
-git init -q "$bearssl_tmp"
-git -C "$bearssl_tmp" fetch -q --depth 1 \
-    https://www.bearssl.org/git/BearSSL "$bearssl_sha"
-git -C "$bearssl_tmp" checkout -q FETCH_HEAD
-[[ "$(git -C "$bearssl_tmp" rev-parse HEAD)" == "$bearssl_sha" ]]
-python3 - "$bearssl_tmp" <<'PY'
+# bearssl.org answers 502 for days at a time; retry, then fall back to the 0.6
+# release sources that Debian carries (same layout, same files).
+bearssl_src=""
+for attempt in 1 2 3; do
+    rm -rf "$bearssl_tmp"; mkdir -p "$bearssl_tmp"
+    git init -q "$bearssl_tmp"
+    if git -C "$bearssl_tmp" fetch -q --depth 1 \
+        https://www.bearssl.org/git/BearSSL "$bearssl_sha" 2>/dev/null; then
+        git -C "$bearssl_tmp" checkout -q FETCH_HEAD
+        if [[ "$(git -C "$bearssl_tmp" rev-parse HEAD)" == "$bearssl_sha" ]]; then
+            bearssl_src="$bearssl_tmp"
+            echo "BearSSL: fetched $bearssl_sha from upstream"
+            break
+        fi
+    fi
+    echo "BearSSL: upstream unreachable (attempt $attempt), retrying"
+    sleep 15
+done
+if [[ -z "$bearssl_src" ]]; then
+    curl -fsSL --retry 4 --retry-delay 5 \
+        -o "$bearssl_tmp/bearssl-0.6.tar.xz" \
+        https://deb.debian.org/debian/pool/main/b/bearssl/bearssl_0.6+dfsg.1.orig.tar.xz
+    tar -xJf "$bearssl_tmp/bearssl-0.6.tar.xz" -C "$bearssl_tmp"
+    bearssl_src="$bearssl_tmp/bearssl-0.6"
+    [[ -d "$bearssl_src/src/symcipher" ]] || { echo "BearSSL: fallback tree missing" >&2; exit 1; }
+    echo "BearSSL: using the 0.6 release sources (upstream git was unavailable)"
+fi
+python3 - "$bearssl_src" <<'PY'
 from pathlib import Path
 import shutil
 import sys
