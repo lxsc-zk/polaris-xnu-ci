@@ -63,16 +63,18 @@ jobs:
           s = p.read_text()
           anchor = "import urllib.request\n"
           assert anchor in s, 'prepare-xnu-source.py: anchor not found'
-          patch = anchor + '''
-_token = os.environ.get('GITHUB_TOKEN')
-if _token:
-    _opener = urllib.request.build_opener()
-    _opener.addheaders = [('Authorization', 'Bearer ' + _token),
-                          ('User-Agent', 'unixnu-ci'),
-                          ('Accept', 'application/vnd.github+json')]
-    urllib.request.install_opener(_opener)
-'''
-          p.write_text(s.replace(anchor, patch, 1))
+          extra = [
+              '',
+              "_token = os.environ.get('GITHUB_TOKEN')",
+              'if _token:',
+              '    _opener = urllib.request.build_opener()',
+              "    _opener.addheaders = [('Authorization', 'Bearer ' + _token),",
+              "                          ('User-Agent', 'unixnu-ci'),",
+              "                          ('Accept', 'application/vnd.github+json')]",
+              '    urllib.request.install_opener(_opener)',
+              '',
+          ]
+          p.write_text(s.replace(anchor, anchor + '\n'.join(extra), 1))
           print('patched', p)
           PY
           grep -n 'GITHUB_TOKEN' UniXNU/scripts/prepare-xnu-source.py
