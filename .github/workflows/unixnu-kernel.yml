@@ -1,0 +1,73 @@
+name: unixnu-kernel
+
+# Builds the UniXNU source kernel (XNU 10063 / Darwin 23) for polaris on a
+# macOS runner that ships Xcode 26.6 by default, then hands the kernel.macho
+# back as an artifact. Everything else (fetch/tree/package/payload/bootimg)
+# runs locally in WSL.
+#
+# Triggered by a push to this branch (workflow_dispatch additionally works once
+# the file lives on the default branch).
+
+on:
+  push:
+    branches: [unixnu-kernel]
+  workflow_dispatch:
+
+env:
+  UNIXNU_COMMIT: 37987aea410691df3c1e0e146a1bfd6127932149
+  POLARIS_COMMIT: 3704a6b475154aa27628d2585d34e131e9a09ecc
+
+jobs:
+  kernel:
+    runs-on: macos-26
+    timeout-minutes: 240
+    steps:
+      - name: Report toolchain
+        run: |
+          uname -a
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+          xcrun --sdk iphoneos --show-sdk-version || true
+          python3 --version
+          cmake --version | head -1 || echo 'cmake MISSING'
+          perl -v | head -2
+
+      - name: Fetch UniXNU and the polaris device repository
+        run: |
+          set -eux
+          git clone --filter=blob:none https://github.com/UniXNU/UniXNU.git
+          git -C UniXNU checkout "$UNIXNU_COMMIT"
+          git clone --filter=blob:none https://github.com/SPRMD/UniXNU-polaris.git polaris
+          git -C polaris checkout "$POLARIS_COMMIT"
+
+      - name: defconfig / fetch / tree
+        run: |
+          set -eux
+          cd UniXNU
+          ./unixnu defconfig polaris_defconfig -D ../polaris
+          ./unixnu fetch -D ../polaris
+          ./unixnu tree -D ../polaris
+          ./unixnu status -D ../polaris | head -40
+
+      - name: Build kernel
+        run: |
+          set -eux
+          cd UniXNU
+          ./unixnu build kernel -D ../polaris -j 8
+
+      - name: Collect outputs
+        if: always()
+        run: |
+          set -x
+          find UniXNU/out/polaris -maxdepth 3 -type f \( -name '*.macho' -o -name '*.json' -o -name '*.log' \) -print -exec ls -l {} \; | head -60
+
+      - name: Upload kernel artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unixnu-kernel
+          path: |
+            UniXNU/out/polaris/kernel/**
+            UniXNU/out/polaris/logs/**
+          if-no-files-found: warn
