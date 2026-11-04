@@ -1,0 +1,26 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-04 21:45:23.499623868 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-04 21:45:34.221529765 +0800
+@@ -3940,12 +3940,22 @@
+ 		if (skip_steps & 1u << step) {
+ 			continue;
+ 		}
++		/*
++		 * polaris: a bare "done" says nothing about what the step did, and this port has
++		 * been misled by that twice. Say what the step is and, once it returns, the state
++		 * it left behind - the GMU's own answer included, so a step that quietly found
++		 * everything already in place cannot be mistaken for one that did the work.
++		 */
++		printf("adreno: step %u/%u: begin - %s\n", step, last_step, what[step]);
+ 		if (!steps[step - 1]()) {
+ 			printf("adreno: step %u: FAILED; the steps after it are not attempted\n", step);
+ 			failed = step;
+ 			break;
+ 		}
+-		printf("adreno: step %u: done\n", step);
++		printf("adreno: step %u: done [cx=%d gmu_mem=%d gmu_runs=%d gmu_talks=%d core=%d core_runs=%d "
++		    "zap=%d fw_init=%#x sptprac=%#x rpmh=%#x]\n", step, cx_is_on(), gmu_space_is_on, gmu_runs,
++		    gmu_talks, core_is_on, core_runs, zap_is_loaded, rd(gmu.base + GMU_CM3_FW_INIT_RESULT),
++		    rd(gmu.base + GMU_SPTPRAC_PWR_CLK_STATUS), rd(gmu.base + GMU_RPMH_POWER_STATE));
+ 		done = step;
+ 	}
+ 	PE_parse_boot_argn("adreno_keep", &keep, sizeof(keep));
