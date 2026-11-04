@@ -5578,3 +5578,21 @@ index 0000000..60c8367
  iokit/Kernel/MiniIOSurface.cpp                                   optional iokitcpp
  iokit/Kernel/arm/SweetBattery.cpp                                optional iokitcpp
  iokit/Kernel/arm/hid/SweetHID.cpp                                optional iokitcpp
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -665,8 +665,13 @@
+ 	sweet_touch_init();
+ 	polaris_touch_diag();
+ 	polaris_touch_i2c_init();
+-	polaris_gpu_diag();
+-	polaris_gpu_init();
++	/*
++	 * The A630 driver from the fajita port (sweet_gpu.c) replaces the polaris
++	 * bring-up: it answers to adreno=<level> and reads its firmware from the
++	 * sweetfw0..3 arguments the payload carries.
++	 */
++	extern void sweet_gpu_probe(void);
++	sweet_gpu_probe();
+ 	sweet_usb_probe();
+ 	return 0;
+ }
