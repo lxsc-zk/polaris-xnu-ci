@@ -1,0 +1,24 @@
+--- a/bsd/dev/hakios.adreno.c	2026-11-04 21:58:48.590864639 +0800
++++ b/bsd/dev/hakios.adreno.c	2026-11-04 21:58:48.634864555 +0800
+@@ -3952,10 +3952,18 @@
+ 			failed = step;
+ 			break;
+ 		}
++		/*
++		 * polaris: gpucc and the GMU are mapped by later steps than the first, so this
++		 * line must not touch either until the step that maps it has run - reading
++		 * gpucc + 0x1540 with a null base is how this print once panicked at step 1.
++		 */
+ 		printf("adreno: step %u: done [cx=%d gmu_mem=%d gmu_runs=%d gmu_talks=%d core=%d core_runs=%d "
+-		    "zap=%d fw_init=%#x sptprac=%#x rpmh=%#x]\n", step, cx_is_on(), gmu_space_is_on, gmu_runs,
+-		    gmu_talks, core_is_on, core_runs, zap_is_loaded, rd(gmu.base + GMU_CM3_FW_INIT_RESULT),
+-		    rd(gmu.base + GMU_SPTPRAC_PWR_CLK_STATUS), rd(gmu.base + GMU_RPMH_POWER_STATE));
++		    "zap=%d fw_init=%#x sptprac=%#x rpmh=%#x]\n", step,
++		    gpucc.base != NULL ? (int)cx_is_on() : -1, gmu_space_is_on, gmu_runs, gmu_talks, core_is_on,
++		    core_runs, zap_is_loaded,
++		    gmu.base != NULL ? rd(gmu.base + GMU_CM3_FW_INIT_RESULT) : 0u,
++		    gmu.base != NULL ? rd(gmu.base + GMU_SPTPRAC_PWR_CLK_STATUS) : 0u,
++		    gmu.base != NULL ? rd(gmu.base + GMU_RPMH_POWER_STATE) : 0u);
+ 		done = step;
+ 	}
+ 	PE_parse_boot_argn("adreno_keep", &keep, sizeof(keep));
