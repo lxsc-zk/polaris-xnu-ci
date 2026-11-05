@@ -1,0 +1,72 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -582,6 +582,15 @@
+ }
+ 
+ static bool
++/* The payload blob that holds the arena is bounded by the boot image size (about 15 MB
++ * here), and Metal asks for buffers of many MiB. IOKit's allocator hands back physically
++ * contiguous memory or NULL - it does not panic the way kmem_alloc does in this port. */
++extern void *IOMallocContiguous(vm_size_t size, vm_size_t alignment, addr64_t *physicalAddress);
++
++static addr64_t gpu_run_arena_pa;
++static vm_size_t gpu_run_arena_bytes;
++static void *gpu_run_arena_kva;
++
+ gpu_bo_init(vm_offset_t blob)
+ {
+ 	char arg[64];
+@@ -593,7 +602,31 @@
+ 	for (unsigned i = 0; i < GPU_BO_MAX; i++) {
+ 		gpu_bos[i].used = false;
+ 	}
+-	if (!PE_parse_boot_argn("sweetfw2", arg, sizeof(arg)) ||
++	{
++		int want_mb = 0;
++
++		(void) PE_parse_boot_argn("gpuarenamb", &want_mb, sizeof(want_mb));
++		if (want_mb <= 0) {
++			want_mb = 32;
++		}
++		for (int mb = want_mb; mb >= 4; mb >>= 1) {
++			addr64_t phys = 0;
++			void *kva = IOMallocContiguous((vm_size_t)mb << 20, 0x4000, &phys);
++
++			printf("SWEET VM: IOMallocContiguous %d MiB -> %p pa %#llx %s\n",
++			    mb, kva, (unsigned long long)phys, (kva && phys) ? "" : "(no)");
++			if (kva != NULL && phys != 0) {
++				gpu_run_arena_kva = kva;
++				gpu_run_arena_pa = phys;
++				gpu_run_arena_bytes = (vm_size_t)mb << 20;
++				break;
++			}
++		}
++	}
++	if (gpu_run_arena_bytes != 0) {
++		pa = gpu_run_arena_pa;
++		size = gpu_run_arena_bytes;
++	} else if (!PE_parse_boot_argn("sweetfw2", arg, sizeof(arg)) ||
+ 	    !gpu_parse_range(arg, &pa, &size) || size < GPU_ARENA_BYTES || size > GPU_ARENA_MAX_BYTES) {
+ 		printf("SWEET GPU: no sweetfw2 arena of %u KiB..%u MiB (got %llu); buffers unavailable\n",
+ 		    GPU_ARENA_BYTES / 1024, GPU_ARENA_MAX_BYTES >> 20, (unsigned long long)size);
+@@ -620,15 +653,17 @@
+ 		 * works for command buffers of any size.
+ 		 */
+ 		gpu_arena_window_bytes = gpu_arena_size;
+-		gpu_arena_windows[0] = ml_io_map((vm_offset_t)pa, (vm_size_t)gpu_arena_size);
++		gpu_arena_windows[0] = (gpu_run_arena_bytes != 0) ? (vm_offset_t)gpu_run_arena_kva
++		    : ml_io_map((vm_offset_t)pa, (vm_size_t)gpu_arena_size);
+ 		if (gpu_arena_windows[0] == 0) {
+ 			printf("SWEET GPU: cannot map the %u KiB arena\n", gpu_arena_size / 1024);
+ 			gpu_arena_window_bytes = 0;
+ 			return false;
+ 		}
+ 		gpu_arena_mapped_bytes = gpu_arena_size;
+-		printf("SWEET GPU: buffer arena %u KiB at %#llx, mapped whole\n",
+-		    gpu_arena_size / 1024, (unsigned long long)pa);
++		printf("SWEET GPU: buffer arena %u KiB at %#llx, mapped whole (%s)\n",
++		    gpu_arena_size / 1024, (unsigned long long)pa,
++		    gpu_run_arena_bytes ? "runtime" : "blob");
+ 	}
+ 
+ 	/*
