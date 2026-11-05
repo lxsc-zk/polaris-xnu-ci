@@ -1,0 +1,79 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -575,9 +575,24 @@
+ {
+ 	uint32_t w = off / gpu_arena_window_bytes;
+ 
+-	if (gpu_arena_window_bytes == 0 || w >= GPU_ARENA_WINDOWS || off >= gpu_arena_mapped_bytes) {
++	if (gpu_arena_window_bytes == 0 || w >= GPU_ARENA_WINDOWS || off >= gpu_arena_size) {
+ 		return 0;
+ 	}
++	/*
++	 * A window is mapped the first time something reaches it: a whole 64 MiB arena does not
++	 * fit the IOKit submap in one ml_io_map, but 128 windows of 1 MiB do, and a buffer that
++	 * spans several of them still gets valid memory one window at a time.
++	 */
++	if (gpu_arena_windows[w] == 0) {
++		gpu_arena_windows[w] = ml_io_map(
++		    (vm_offset_t)(gpu_arena_pa + (uint64_t)w * gpu_arena_window_bytes),
++		    (vm_size_t)gpu_arena_window_bytes);
++		if (gpu_arena_windows[w] == 0) {
++			printf("SWEET GPU: arena window %u (pa %#llx) does not map\n", w,
++			    (unsigned long long)(gpu_arena_pa + (uint64_t)w * gpu_arena_window_bytes));
++			return 0;
++		}
++	}
+ 	return gpu_arena_windows[w] + (off % gpu_arena_window_bytes);
+ }
+ 
+@@ -822,12 +837,21 @@
+ 		return NULL;
+ 	}
+ 	gpu_arena_used = off + size;
+-	if (gpu_arena_mapped_bytes != 0) {
+-		volatile uint32_t *zero = (volatile uint32_t *)gpu_arena_kva(off);
++	for (uint32_t done = 0; done < size; ) {
++		uint32_t chunk = size - done;
++		volatile uint32_t *zero;
+ 
+-		for (uint32_t i = 0; i < size / 4; i++) {
++		if (chunk > gpu_arena_window_bytes) {
++			chunk = gpu_arena_window_bytes;
++		}
++		zero = (volatile uint32_t *)gpu_arena_kva(off + done);
++		if (zero == NULL) {
++			break;
++		}
++		for (uint32_t i = 0; i < chunk / 4; i++) {
+ 			zero[i] = 0;
+ 		}
++		done += chunk;
+ 	}
+ 
+ 	bo->kva = gpu_arena_kva(off);
+@@ -2369,12 +2393,20 @@
+ 		    (unsigned long long)sz, gpu_arena_used, gpu_arena_size);
+ 		return false;
+ 	}
+-	vm_offset_t alias = gpu_arena_kva(off);
+-	if (alias != 0) {
+-		for (uint64_t i = 0; i < sz; i += 4) {
+-			*(volatile uint32_t *)(alias + (uint32_t)i) = 0;
++	for (uint64_t done = 0; done < sz; ) {
++		uint32_t chunk = (uint32_t)((sz - done) < gpu_arena_window_bytes ?
++		    (sz - done) : gpu_arena_window_bytes);
++		vm_offset_t alias = gpu_arena_kva((uint32_t)(off + done));
++
++		if (alias == 0) {
++			break;
+ 		}
+-	} else {
++		for (uint32_t i = 0; i < chunk; i += 4) {
++			*(volatile uint32_t *)(alias + i) = 0;
++		}
++		done += chunk;
++	}
++	if (0) {
+ 		/* No alias for this one: the payload blob is built zeroed and the client writes it. */
+ 		printf("SWEET GPU: arena: %llu bytes at arena+%#x without a kernel alias\n",
+ 		    (unsigned long long)sz, off);
