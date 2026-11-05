@@ -1,0 +1,36 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -623,27 +623,12 @@
+ 			    (unsigned long long)gpa, (unsigned long long)(gsz >> 20));
+ 		}
+ 	}
+-	{
+-		int want_mb = 0;
+-
+-		(void) PE_parse_boot_argn("gpuarenamb", &want_mb, sizeof(want_mb));
+-		if (want_mb <= 0) {
+-			want_mb = 32;
+-		}
+-		for (int mb = want_mb; mb >= 4; mb >>= 1) {
+-			addr64_t phys = 0;
+-			void *kva = IOMallocContiguous((vm_size_t)mb << 20, 0x4000, &phys);
+-
+-			printf("SWEET VM: IOMallocContiguous %d MiB -> %p pa %#llx %s\n",
+-			    mb, kva, (unsigned long long)phys, (kva && phys) ? "" : "(no)");
+-			if (kva != NULL && phys != 0) {
+-				gpu_run_arena_kva = kva;
+-				gpu_run_arena_pa = phys;
+-				gpu_run_arena_bytes = (vm_size_t)mb << 20;
+-				break;
+-			}
+-		}
+-	}
++	/*
++	 * No IOMallocContiguous here: in this port it is kmem_alloc underneath, and kmem_alloc
++	 * panics on failure (vm_kern.c:178) - asking it for 32 MiB took the boot down right after
++	 * the CP tests passed. The arena comes from gpuarena= or the sweetfw2 blob, both of which
++	 * are real DRAM above gPhysBase, which is the only memory pmap accepts here.
++	 */
+ 	if (gpu_run_arena_bytes != 0) {
+ 		pa = gpu_run_arena_pa;
+ 		size = gpu_run_arena_bytes;
