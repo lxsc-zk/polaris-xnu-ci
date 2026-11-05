@@ -1,0 +1,20 @@
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -2009,6 +2009,17 @@
+ #else
+ 	real_avail_end = avail_end;
+ #endif
++	printf("SWEET MEM: gPhysBase %#llx mem_size %#llx avail_start %#llx avail_end %#llx "
++	    "real_avail_end %#llx; %u memory regions\n",
++	    (unsigned long long)gPhysBase, (unsigned long long)mem_size,
++	    (unsigned long long)avail_start, (unsigned long long)avail_end,
++	    (unsigned long long)real_avail_end, pmap_memory_region_count);
++	for (unsigned i = 0; i < pmap_memory_region_count && i < 12; i++) {
++		printf("SWEET MEM: region %u: %#llx + %#llx (%s)\n", i,
++		    (unsigned long long)pmap_memory_regions[i].pstart,
++		    (unsigned long long)pmap_memory_regions[i].size,
++		    (pmap_memory_regions[i].pstart >= gPhysBase) ? "above base" : "BELOW BASE");
++	}
+ 
+ 	/*
+ 	 * Initialize l1 and l2 page table pages :
