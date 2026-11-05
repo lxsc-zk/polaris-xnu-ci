@@ -1,0 +1,40 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -162,9 +162,29 @@
+ class IOAcceleratorES : public IOService
+ {
+ 	OSDeclareDefaultStructors(IOAcceleratorES);
++public:
++	IOUserClient *newUserClient(task_t owningTask, void *securityID, UInt32 type,
++	    OSDictionary *properties) APPLE_KEXT_OVERRIDE;
+ };
+ OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
+ 
++IOUserClient *
++IOAcceleratorES::newUserClient(task_t owningTask, void *securityID, UInt32 type, OSDictionary *properties)
++{
++	IOAcceleratorESUserClient *client;
++
++	IOLog("SWEET FB: IOAcceleratorES open requested, type %u\n", type);
++	client = new IOAcceleratorESUserClient;
++	if (client == NULL) {
++		return NULL;
++	}
++	if (!client->initWithTask(owningTask, securityID, type) || !client->attach(this)) {
++		client->release();
++		return NULL;
++	}
++	return client;
++}
++
+ /*
+  * fajita: Metal reaches the accelerator through IOServiceOpen, not by reading
+  * properties off the registry. A bare IOService answers the open with
+@@ -203,6 +223,7 @@
+ bool
+ IOAcceleratorESUserClient::start(IOService *provider)
+ {
++	IOLog("SWEET FB: IOAcceleratorES user client OPENED (someone is using the accelerator)\n");
+ 	return IOUserClient::start(provider);
+ }
+ 
