@@ -1,9 +1,9 @@
 --- a/bsd/dev/sweet_gpu.c
 +++ b/bsd/dev/sweet_gpu.c
-@@ -582,6 +582,15 @@
+@@ -581,6 +581,15 @@
+ 	return gpu_arena_windows[w] + (off % gpu_arena_window_bytes);
  }
  
- static bool
 +/* The payload blob that holds the arena is bounded by the boot image size (about 15 MB
 + * here), and Metal asks for buffers of many MiB. IOKit's allocator hands back physically
 + * contiguous memory or NULL - it does not panic the way kmem_alloc does in this port. */
@@ -13,9 +13,9 @@
 +static vm_size_t gpu_run_arena_bytes;
 +static void *gpu_run_arena_kva;
 +
+ static bool
  gpu_bo_init(vm_offset_t blob)
  {
- 	char arg[64];
 @@ -593,7 +602,31 @@
  	for (unsigned i = 0; i < GPU_BO_MAX; i++) {
  		gpu_bos[i].used = false;
