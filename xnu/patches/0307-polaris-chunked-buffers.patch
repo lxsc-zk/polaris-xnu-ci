@@ -1,0 +1,140 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -2214,6 +2214,105 @@
+  * like the chardev BOs these pages are never returned (bump allocator).
+  */
+ bool
++/*
++ * Buffers larger than the payload's arena blob: IOKit hands back at most about a megabyte of
++ * physically contiguous memory here, so a buffer is composed of several chunks and mapped page
++ * by page. mapGem() asks sweet_gpu_pa_at() for each page instead of assuming pa + offset.
++ */
++#define GPU_CHUNKS      16u
++#define GPU_CHUNK_BYTES (1u << 20)
++
++struct gpu_chunklist {
++	uint64_t bo_pa;
++	uint32_t n;
++	uint32_t bytes[GPU_CHUNKS];
++	addr64_t pa[GPU_CHUNKS];
++	void *kva[GPU_CHUNKS];
++};
++
++static struct gpu_chunklist gpu_chunklists[32];
++
++static struct gpu_chunklist *
++gpu_chunklist_for(uint64_t bo_pa, bool create)
++{
++	for (unsigned i = 0; i < 32; i++) {
++		if (gpu_chunklists[i].n != 0 && gpu_chunklists[i].bo_pa == bo_pa) {
++			return &gpu_chunklists[i];
++		}
++	}
++	if (!create) {
++		return NULL;
++	}
++	for (unsigned i = 0; i < 32; i++) {
++		if (gpu_chunklists[i].n == 0) {
++			gpu_chunklists[i].bo_pa = bo_pa;
++			return &gpu_chunklists[i];
++		}
++	}
++	return NULL;
++}
++
++uint64_t
++sweet_gpu_pa_at(uint64_t bo_pa, uint64_t off)
++{
++	struct gpu_chunklist *l = gpu_chunklist_for(bo_pa, false);
++	uint64_t at = 0;
++
++	if (l == NULL) {
++		return bo_pa + off;             /* a single arena or contiguous buffer */
++	}
++	for (unsigned i = 0; i < l->n; i++) {
++		if (off < at + l->bytes[i]) {
++			return l->pa[i] + (off - at);
++		}
++		at += l->bytes[i];
++	}
++	return 0;
++}
++
++static bool
++gpu_chunked_alloc(uint64_t size, uint64_t *pa, void **kva)
++{
++	struct gpu_chunklist *l;
++	uint64_t done = 0;
++
++	l = gpu_chunklist_for(0xdeadbeefull, true);     /* reserve a slot, pa filled after */
++	if (l == NULL) {
++		return false;
++	}
++	while (done < size && l->n < GPU_CHUNKS) {
++		uint64_t left = size - done;
++		uint32_t want = left < (uint64_t)GPU_CHUNK_BYTES ? (uint32_t)left : GPU_CHUNK_BYTES;
++		addr64_t phys = 0;
++		void *k = IOMallocContiguous((vm_size_t)want, 0x4000, &phys);
++
++		if (k == NULL || phys == 0) {
++			break;
++		}
++		memset(k, 0, want);
++		l->bytes[l->n] = want;
++		l->pa[l->n] = phys;
++		l->kva[l->n] = k;
++		l->n++;
++		done += want;
++	}
++	if (done < size) {
++		printf("SWEET GPU: chunked: %llu of %llu bytes only (%u chunks)\n",
++		    (unsigned long long)done, (unsigned long long)size, l->n);
++		for (unsigned i = 0; i < l->n; i++) {
++			IOFreeContiguous(l->kva[i], l->bytes[i]);
++		}
++		l->n = 0;
++		return false;
++	}
++	l->bo_pa = l->pa[0];
++	*pa = l->pa[0];
++	*kva = l->kva[0];
++	printf("SWEET GPU: chunked: %llu bytes in %u chunks, first pa %#llx\n",
++	    (unsigned long long)size, l->n, (unsigned long long)l->pa[0]);
++	return true;
++}
++
+ sweet_gpu_alloc_pages(uint64_t size, uint64_t *pa, void **kva)
+ {
+ 	uint64_t sz = (size + 0xfffull) & ~0xfffull;
+@@ -2226,7 +2325,11 @@
+ 		 * allocates, IOKit's allocator is up, and what these buffers need is only that each
+ 		 * one be physically contiguous: mapGem() walks it a page at a time from pa.
+ 		 */
+-		if (gpu_live && gpu_arena_window_bytes != 0 && sz != 0 && sz <= (64ull << 20)) {
++		if (gpu_live && gpu_arena_window_bytes != 0 && sz != 0 && sz <= (16ull << 20) &&
++		    gpu_chunked_alloc(sz, pa, kva)) {
++			return true;
++		}
++		if (0) {
+ 			addr64_t phys = 0;
+ 			void *k = IOMallocContiguous((vm_size_t)sz, 0x4000, &phys);
+ 
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -58,6 +58,7 @@
+ void sweet_gpu_dump_cp_state(const char *why);
+ void sweet_gpu_report(const char *why);
+ bool     sweet_gpu_alloc_pages(uint64_t size, uint64_t *pa, void **kva);
++uint64_t sweet_gpu_pa_at(uint64_t bo_pa, uint64_t off);
+ void     sweet_gpu_free_pages(uint64_t pa, uint64_t size);
+ /* osfmk/arm64/caches_asm.s: clean the dcache for a physical range via the linear map. */
+ void     flush_dcache64(addr64_t addr, unsigned length, boolean_t phys);
+@@ -364,7 +365,7 @@
+ 		uint64_t pa;
+ 		if (slot->pa != 0) {
+ 			/* GEM_NEW: the arena address is already known, no descriptor walk needed. */
+-			pa = slot->pa + mapped;
++			pa = sweet_gpu_pa_at(slot->pa, mapped);
+ 		} else {
+ 			IOByteCount length = 0;
+ 			pa = (uint64_t)slot->md->getPhysicalSegment(mapped, &length, kIOMemoryMapperNone);
