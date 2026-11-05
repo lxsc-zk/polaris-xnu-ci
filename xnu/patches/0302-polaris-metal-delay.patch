@@ -1,0 +1,80 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -98,6 +98,9 @@
+ 	uint64_t            fVsyncCount;
+ 
+ 	static void vsyncFired(OSObject *owner, IOTimerEventSource *sender);
++	IOTimerEventSource *fAccelTimer;      /* fajita: metalplugindelay */
++	static void accelFired(OSObject *owner, IOTimerEventSource *sender);
++	void publishAccelAgain(void);
+ 
+ public:
+ 	uint64_t      fPhys;
+@@ -350,6 +353,23 @@
+ 			IOLog("SWEET FB: no memory for the IOAcceleratorES stub\n");
+ 		}
+ 	}
++	/*
++	 * fajita: Metal builds its plugin list once, early, and does not rescan, so the
++	 * service above gets matched by backboardd and then never used. Publishing a
++	 * second instance from a timer puts it in front of Metal at a moment it still
++	 * looks. metalplugindelay=<seconds> chooses when; 0 leaves it alone.
++	 */
++	{
++		uint32_t accelDelay = 0;
++		(void) PE_parse_boot_argn("metalplugindelay", &accelDelay, sizeof(accelDelay));
++		if (accelDelay > 0) {
++			fAccelTimer = IOTimerEventSource::timerEventSource(this, &AppleCLCD::accelFired);
++			if (fAccelTimer != NULL && fWorkLoop->addEventSource(fAccelTimer) == kIOReturnSuccess) {
++				fAccelTimer->setTimeoutMS((accelDelay < 120 ? accelDelay : 120) * 1000);
++				IOLog("SWEET FB: IOAcceleratorES will be published again in %u s\n", accelDelay);
++			}
++		}
++	}
+ 	{
+ 		AppleM2ScalerCSCDriver * scaler = OSTypeAlloc(AppleM2ScalerCSCDriver);
+ 
+@@ -382,6 +402,43 @@
+ }
+ 
+ void
++AppleCLCD::accelFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	AppleCLCD *fb = (AppleCLCD *)owner;
++
++	if (fb != NULL) {
++		fb->publishAccelAgain();
++	}
++}
++
++void
++AppleCLCD::publishAccelAgain(void)
++{
++	IOAcceleratorES *accelerator = OSTypeAlloc(IOAcceleratorES);
++	uint32_t realPlugin = 0;
++	const char *pluginName;
++	const char *pluginClass;
++
++	if (accelerator == NULL) {
++		return;
++	}
++	if (!accelerator->init() || !accelerator->attach(this)) {
++		accelerator->release();
++		return;
++	}
++	(void) PE_parse_boot_argn("metalplugin", &realPlugin, sizeof(realPlugin));
++	pluginName  = realPlugin ? "SweetBGMTL" : "SweetMetalProbe";
++	pluginClass = realPlugin ? "BGMTLDevice" : "SweetMetalDevice";
++	accelerator->setProperty(kIOUserClientClassKey, "IOAcceleratorESUserClient");
++	accelerator->setProperty("MetalPluginName", pluginName);
++	accelerator->setProperty("MetalPluginClassName", pluginClass);
++	accelerator->setName("sgx");
++	accelerator->registerService();
++	IOLog("SWEET FB: IOAcceleratorES published again (MetalPluginName %s class %s)\n",
++	    pluginName, pluginClass);
++}
++
++void
+ AppleCLCD::vsyncFired(OSObject *owner, IOTimerEventSource *sender)
+ {
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
