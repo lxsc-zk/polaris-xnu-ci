@@ -61,11 +61,10 @@
  		}
  	}
  	{
-@@ -382,6 +373,51 @@
+@@ -382,6 +373,50 @@
  }
  
  void
-+void
 +AppleCLCD::accelFired(OSObject *owner, IOTimerEventSource *sender)
 +{
 +	AppleCLCD *fb = (AppleCLCD *)owner;
