@@ -4,7 +4,7 @@
  
  TUNABLE(bool, up_style_idle_exit, "up_style_idle_exit", false);
  
-+extern uint64_t gPhysBase, gPhysSize;
++extern unsigned long gPhysBase, gPhysSize;
 +
  void
  flush_dcache(
