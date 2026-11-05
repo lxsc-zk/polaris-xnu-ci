@@ -1,0 +1,59 @@
+--- a/osfmk/arm/caches.c
++++ b/osfmk/arm/caches.c
+@@ -57,6 +57,8 @@
+ 
+ TUNABLE(bool, up_style_idle_exit, "up_style_idle_exit", false);
+ 
++extern uint64_t gPhysBase, gPhysSize;
++
+ void
+ flush_dcache(
+ 	vm_offset_t addr,
+@@ -72,6 +74,23 @@
+ 		if (phys) {
+ 			count = length;
+ 			paddr = (pmap_paddr_t)addr;
++			/*
++			 * Only the kernel's own DRAM is inside the linear map. A physical address
++			 * outside it is device memory (the firmware framebuffer, a reserved DMA
++			 * region): the CPU maps it uncached, so no cache line of it can exist to
++			 * maintain - and phystokv_range() panics on such an address outright. Skip
++			 * it the way the native Adreno driver does (int-080: illegal PA 0xb8000000).
++			 */
++			if (paddr < gPhysBase || (paddr - gPhysBase) >= gPhysSize) {
++				vm_size_t step = PAGE_SIZE - (addr & PAGE_MASK);
++
++				if (step > length) {
++					step = length;
++				}
++				addr += step;
++				length -= step;
++				continue;
++			}
+ 			vaddr = phystokv_range(paddr, &count);
+ 		} else {
+ 			paddr = kvtophys(addr);
+@@ -106,6 +125,23 @@
+ 		if (phys) {
+ 			count = length;
+ 			paddr = (pmap_paddr_t)addr;
++			/*
++			 * Only the kernel's own DRAM is inside the linear map. A physical address
++			 * outside it is device memory (the firmware framebuffer, a reserved DMA
++			 * region): the CPU maps it uncached, so no cache line of it can exist to
++			 * maintain - and phystokv_range() panics on such an address outright. Skip
++			 * it the way the native Adreno driver does (int-080: illegal PA 0xb8000000).
++			 */
++			if (paddr < gPhysBase || (paddr - gPhysBase) >= gPhysSize) {
++				vm_size_t step = PAGE_SIZE - (addr & PAGE_MASK);
++
++				if (step > length) {
++					step = length;
++				}
++				addr += step;
++				length -= step;
++				continue;
++			}
+ 			vaddr = phystokv_range(paddr, &count);
+ 		} else {
+ 			paddr = kvtophys(addr);
