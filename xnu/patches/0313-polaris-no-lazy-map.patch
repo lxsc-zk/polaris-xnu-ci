@@ -1,0 +1,28 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -579,19 +579,14 @@
+ 		return 0;
+ 	}
+ 	/*
+-	 * A window is mapped the first time something reaches it: a whole 64 MiB arena does not
+-	 * fit the IOKit submap in one ml_io_map, but 128 windows of 1 MiB do, and a buffer that
+-	 * spans several of them still gets valid memory one window at a time.
++	 * No lazy ml_io_map here: it takes a non-sleepable rw lock, and the client's ioctl path
++	 * runs with preemption enabled - "Taking non-sleepable RW lock with preemption enabled"
++	 * at lock_rw.c:1377. A gpuarena arena may therefore have no kernel alias at all; the
++	 * callers treat kva == 0 as "map it yourself", which is what the Metal client does
++	 * through clientMemoryForType().
+ 	 */
+ 	if (gpu_arena_windows[w] == 0) {
+-		gpu_arena_windows[w] = ml_io_map(
+-		    (vm_offset_t)(gpu_arena_pa + (uint64_t)w * gpu_arena_window_bytes),
+-		    (vm_size_t)gpu_arena_window_bytes);
+-		if (gpu_arena_windows[w] == 0) {
+-			printf("SWEET GPU: arena window %u (pa %#llx) does not map\n", w,
+-			    (unsigned long long)(gpu_arena_pa + (uint64_t)w * gpu_arena_window_bytes));
+-			return 0;
+-		}
++		return 0;
+ 	}
+ 	return gpu_arena_windows[w] + (off % gpu_arena_window_bytes);
+ }
