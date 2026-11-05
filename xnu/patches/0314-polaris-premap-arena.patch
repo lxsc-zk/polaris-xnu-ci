@@ -1,0 +1,48 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -676,14 +676,42 @@
+ 		 * paths below handle zeroing.
+ 		 */
+ 		gpu_arena_window_bytes = 0x100000u;
+-		gpu_arena_windows[0] = (gpu_run_arena_kva != NULL) ? (vm_offset_t)gpu_run_arena_kva
+-		    : 0;
++		gpu_arena_windows[0] = (gpu_run_arena_kva != NULL) ? (vm_offset_t)gpu_run_arena_kva : 0;
++		if (gpu_arena_windows[0] == 0 && gpu_run_arena_pa != 0) {
++			/*
++			 * Map every window here, at probe time: ml_io_map takes a non-sleepable rw
++			 * lock, and doing it later from the client's ioctl path (preemption enabled)
++			 * panics at lock_rw.c:1377. 64 MiB in 1 MiB windows is what the submap holds.
++			 */
++			uint32_t nwin = gpu_arena_size / gpu_arena_window_bytes;
++
++			if (nwin > GPU_ARENA_WINDOWS) {
++				nwin = GPU_ARENA_WINDOWS;
++			}
++			uint32_t mapped = 0;
++			for (uint32_t w = 0; w < nwin; w++) {
++				vm_offset_t k = ml_io_map(
++				    (vm_offset_t)(gpu_run_arena_pa + (uint64_t)w * gpu_arena_window_bytes),
++				    (vm_size_t)gpu_arena_window_bytes);
++				if (k == 0) {
++					printf("SWEET GPU: arena window %u of %u does not map, stopping\n",
++					    w, nwin);
++					break;
++				}
++				gpu_arena_windows[w] = k;
++				mapped++;
++			}
++			printf("SWEET GPU: arena windows mapped %u of %u (1 MiB each)\n", mapped, nwin);
++		}
+ 		if (gpu_arena_windows[0] == 0 && gpu_run_arena_pa == 0) {
+ 			printf("SWEET GPU: cannot map the %u KiB arena\n", gpu_arena_size / 1024);
+ 			gpu_arena_window_bytes = 0;
+ 			return false;
+ 		}
+-		gpu_arena_mapped_bytes = (gpu_arena_windows[0] != 0) ? gpu_arena_window_bytes : 0;
++		gpu_arena_mapped_bytes = (gpu_arena_windows[0] != 0) ? gpu_arena_size : 0;
++		if (gpu_arena_mapped_bytes > GPU_ARENA_WINDOWS * gpu_arena_window_bytes) {
++			gpu_arena_mapped_bytes = GPU_ARENA_WINDOWS * gpu_arena_window_bytes;
++		}
+ 		printf("SWEET GPU: buffer arena %u KiB at %#llx, mapped whole (%s)\n",
+ 		    gpu_arena_size / 1024, (unsigned long long)pa,
+ 		    gpu_run_arena_bytes ? "runtime" : "blob");
