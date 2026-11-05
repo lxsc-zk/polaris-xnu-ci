@@ -1,0 +1,79 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -163,6 +163,68 @@
+ OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
+ 
+ /*
++ * fajita: Metal reaches the accelerator through IOServiceOpen, not by reading
++ * properties off the registry. A bare IOService answers the open with
++ * kIOReturnUnsupported, and Metal then drops the plugin name it just read and
++ * never loads the bundle - the log shows backboardd matching IOAcceleratorES
++ * over and over and nothing after it. This client exists so the open succeeds.
++ */
++class IOAcceleratorESUserClient : public IOUserClient
++{
++	OSDeclareDefaultStructors(IOAcceleratorESUserClient);
++public:
++	bool init(OSDictionary *dictionary) APPLE_KEXT_OVERRIDE;
++	void free(void) APPLE_KEXT_OVERRIDE;
++	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	void stop(IOService *provider) APPLE_KEXT_OVERRIDE;
++	IOReturn clientClose(void) APPLE_KEXT_OVERRIDE;
++	IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments *args,
++	    IOExternalMethodDispatch *dispatch, OSObject *target,
++	    void *reference) APPLE_KEXT_OVERRIDE;
++};
++
++OSDefineMetaClassAndStructors(IOAcceleratorESUserClient, IOUserClient);
++
++bool
++IOAcceleratorESUserClient::init(OSDictionary *dictionary)
++{
++	return IOUserClient::init(dictionary);
++}
++
++void
++IOAcceleratorESUserClient::free(void)
++{
++	IOUserClient::free();
++}
++
++bool
++IOAcceleratorESUserClient::start(IOService *provider)
++{
++	return IOUserClient::start(provider);
++}
++
++void
++IOAcceleratorESUserClient::stop(IOService *provider)
++{
++	IOUserClient::stop(provider);
++}
++
++IOReturn
++IOAcceleratorESUserClient::clientClose(void)
++{
++	terminate(0);
++	return kIOReturnSuccess;
++}
++
++IOReturn
++IOAcceleratorESUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
++    IOExternalMethodDispatch *dispatch, OSObject *target, void *reference)
++{
++	IOLog("SWEET FB: IOAcceleratorES user client selector %u\n", selector);
++	return kIOReturnUnsupported;
++}
++
++/*
+  * A bare AppleM2ScalerCSCDriver. backboardd matches this class to set up the
+  * display's scaler and colour space; with nothing published it logs "none".
+  */
+@@ -275,6 +337,7 @@
+ 			(void)PE_parse_boot_argn("metalplugin", &realPlugin, sizeof(realPlugin));
+ 			const char *pluginName  = realPlugin ? "SweetBGMTL" : "SweetMetalProbe";
+ 			const char *pluginClass = realPlugin ? "BGMTLDevice" : "SweetMetalDevice";
++			accelerator->setProperty(kIOUserClientClassKey, "IOAcceleratorESUserClient");
+ 			bool named = accelerator->setProperty("MetalPluginName", pluginName) &&
+ 			    accelerator->setProperty("MetalPluginClassName", pluginClass);
+ 			accelerator->setName("sgx");
