@@ -1,36 +1,21 @@
 --- a/iokit/Kernel/arm/SweetFramebuffer.cpp
 +++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
-@@ -162,9 +162,29 @@
+@@ -159,9 +159,14 @@
+  * with a plain IOService published under that class it stops waiting and uses
+  * its software renderer, which is enough to get a picture on the panel.
+  */
++class IOAcceleratorESUserClient;
++
  class IOAcceleratorES : public IOService
  {
  	OSDeclareDefaultStructors(IOAcceleratorES);
 +public:
-+	IOUserClient *newUserClient(task_t owningTask, void *securityID, UInt32 type,
-+	    OSDictionary *properties) APPLE_KEXT_OVERRIDE;
++	IOReturn newUserClient(task_t owningTask, void *securityID, UInt32 type,
++	    OSDictionary *properties, IOUserClient **handler) APPLE_KEXT_OVERRIDE;
  };
  OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
  
-+IOUserClient *
-+IOAcceleratorES::newUserClient(task_t owningTask, void *securityID, UInt32 type, OSDictionary *properties)
-+{
-+	IOAcceleratorESUserClient *client;
-+
-+	IOLog("SWEET FB: IOAcceleratorES open requested, type %u\n", type);
-+	client = new IOAcceleratorESUserClient;
-+	if (client == NULL) {
-+		return NULL;
-+	}
-+	if (!client->initWithTask(owningTask, securityID, type) || !client->attach(this)) {
-+		client->release();
-+		return NULL;
-+	}
-+	return client;
-+}
-+
- /*
-  * fajita: Metal reaches the accelerator through IOServiceOpen, not by reading
-  * properties off the registry. A bare IOService answers the open with
-@@ -203,6 +223,7 @@
+@@ -203,6 +208,7 @@
  bool
  IOAcceleratorESUserClient::start(IOService *provider)
  {
@@ -38,3 +23,29 @@
  	return IOUserClient::start(provider);
  }
  
+@@ -213,6 +219,25 @@
+ }
+ 
+ IOReturn
++IOAcceleratorES::newUserClient(task_t owningTask, void *securityID, UInt32 type,
++    OSDictionary *properties, IOUserClient **handler)
++{
++	IOAcceleratorESUserClient *client;
++
++	IOLog("SWEET FB: IOAcceleratorES open requested, type %u\n", type);
++	client = new IOAcceleratorESUserClient;
++	if (client == NULL) {
++		return kIOReturnNoMemory;
++	}
++	if (!client->initWithTask(owningTask, securityID, type) || !client->attach(this)) {
++		client->release();
++		return kIOReturnError;
++	}
++	*handler = client;
++	return kIOReturnSuccess;
++}
++
++IOReturn
+ IOAcceleratorESUserClient::clientClose(void)
+ {
+ 	terminate(0);
