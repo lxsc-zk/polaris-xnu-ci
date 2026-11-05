@@ -1,0 +1,20 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -779,6 +779,17 @@
+ 	if (size == 0 || size > GPU_BO_MAX_BYTES || gpu_arena_window_bytes == 0) {
+ 		return NULL;
+ 	}
++	/*
++	 * The chardev path writes buffers through bo->kva, and a gpuarena arena has no kernel
++	 * alias: every ml_io_map of a 1 MiB window goes through kmem_alloc, which panics when it
++	 * fails here (vm_kern.c:178). Refuse rather than hand out a NULL kva - the Metal client
++	 * takes the IOKit path and maps through clientMemoryForType().
++	 */
++	if (gpu_arena_mapped_bytes == 0) {
++		printf("SWEET GPU: bo: %lu bytes refused (arena has no kernel alias)\n",
++		    (unsigned long)size);
++		return NULL;
++	}
+ 	for (unsigned i = 0; i < GPU_BO_MAX; i++) {
+ 		if (!gpu_bos[i].used) {
+ 			bo = &gpu_bos[i];
