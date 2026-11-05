@@ -1,0 +1,42 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -407,14 +407,31 @@
+ 	 */
+ 	uint64_t pa = 0;
+ 	void *akva = NULL;
+-	if (!sweet_gpu_alloc_pages(size, &pa, &akva)) {
+-		return kIOReturnNoMemory;
+-	}
+-	IOMemoryDescriptor *buf = IOMemoryDescriptor::withPhysicalAddress(
+-	    (IOPhysicalAddress)pa, (IOByteCount)size, kIODirectionInOut);
+-	if (buf == NULL) {
+-		sweet_gpu_free_pages(pa, size);
+-		return kIOReturnNoMemory;
++	IOMemoryDescriptor *buf = NULL;
++	/*
++	 * UniXNU's rule, and it is the one that survives here: a buffer is VM memory the driver
++	 * wires, not memory the driver carves out. The VM only manages DRAM above gPhysBase, so
++	 * its pages are pmap-owned and can be mapped into a client - a carved-out arena cannot
++	 * (pmap_enter_pv: unexpected PV head, pmap_data.c:2393). mapGem() takes the pages one at
++	 * a time from the descriptor when slot->pa is 0.
++	 */
++	IOBufferMemoryDescriptor *vmbuf = IOBufferMemoryDescriptor::inTaskWithOptions(
++	    kernel_task, kIODirectionInOut, size, page_size);
++
++	if (vmbuf != NULL && vmbuf->prepare(kIODirectionInOut) == kIOReturnSuccess) {
++		buf = vmbuf;
++		IOLog("SWEET GPU: gem new %llu bytes from the VM\n", (unsigned long long)size);
++	} else {
++		OSSafeReleaseNULL(vmbuf);
++		if (!sweet_gpu_alloc_pages(size, &pa, &akva)) {
++			return kIOReturnNoMemory;
++		}
++		buf = IOMemoryDescriptor::withPhysicalAddress(
++		    (IOPhysicalAddress)pa, (IOByteCount)size, kIODirectionInOut);
++		if (buf == NULL) {
++			sweet_gpu_free_pages(pa, size);
++			return kIOReturnNoMemory;
++		}
+ 	}
+ 	uint8_t *kva = (uint8_t *)akva;
+ 	/*
