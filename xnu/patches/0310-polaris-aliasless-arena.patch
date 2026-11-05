@@ -1,0 +1,59 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -658,15 +658,22 @@
+ 		 * submap holds it, so every buffer gets a contiguous kernel alias and relocation patching
+ 		 * works for command buffers of any size.
+ 		 */
+-		gpu_arena_window_bytes = gpu_arena_size;
++		/*
++		 * A 32 MiB ml_io_map does not come back in this port (the IOKit submap is small),
++		 * and a buffer this large does not need a kernel alias at all: the client maps
++		 * clientMemoryForType() and writes through its own mapping. Keep the window width
++		 * at the 1 MiB that is known to map, map nothing up front, and let the alias-less
++		 * paths below handle zeroing.
++		 */
++		gpu_arena_window_bytes = 0x100000u;
+ 		gpu_arena_windows[0] = (gpu_run_arena_kva != NULL) ? (vm_offset_t)gpu_run_arena_kva
+-		    : ml_io_map((vm_offset_t)pa, (vm_size_t)gpu_arena_size);
+-		if (gpu_arena_windows[0] == 0) {
++		    : 0;
++		if (gpu_arena_windows[0] == 0 && gpu_run_arena_pa == 0) {
+ 			printf("SWEET GPU: cannot map the %u KiB arena\n", gpu_arena_size / 1024);
+ 			gpu_arena_window_bytes = 0;
+ 			return false;
+ 		}
+-		gpu_arena_mapped_bytes = gpu_arena_size;
++		gpu_arena_mapped_bytes = (gpu_arena_windows[0] != 0) ? gpu_arena_window_bytes : 0;
+ 		printf("SWEET GPU: buffer arena %u KiB at %#llx, mapped whole (%s)\n",
+ 		    gpu_arena_size / 1024, (unsigned long long)pa,
+ 		    gpu_run_arena_bytes ? "runtime" : "blob");
+@@ -803,18 +810,24 @@
+ 	 * a window has to start at a window boundary and is refused if it does not fit.
+ 	 */
+ 	uint32_t off = gpu_arena_used;
+-	if ((off % gpu_arena_window_bytes) + size > gpu_arena_window_bytes) {
++	if (gpu_arena_mapped_bytes == 0) {
++		off = (off + 0xfffu) & ~0xfffu;
++	} else if ((off % gpu_arena_window_bytes) + size > gpu_arena_window_bytes) {
+ 		off = ((off + gpu_arena_window_bytes - 1) / gpu_arena_window_bytes) * gpu_arena_window_bytes;
+ 	}
+-	if ((uint64_t)off + size > gpu_arena_mapped_bytes || off + size > gpu_arena_size) {
++	if ((gpu_arena_mapped_bytes != 0 && (uint64_t)off + size > gpu_arena_mapped_bytes) ||
++	    off + size > gpu_arena_size) {
+ 		printf("SWEET GPU: bo: %lu bytes do not fit a %u KiB window (%u used of %u)\n",
+ 		    (unsigned long)size, gpu_arena_window_bytes / 1024, off, gpu_arena_size);
+ 		return NULL;
+ 	}
+ 	gpu_arena_used = off + size;
+-	volatile uint32_t *zero = (volatile uint32_t *)gpu_arena_kva(off);
+-	for (uint32_t i = 0; i < size / 4; i++) {
+-		zero[i] = 0;
++	if (gpu_arena_mapped_bytes != 0) {
++		volatile uint32_t *zero = (volatile uint32_t *)gpu_arena_kva(off);
++
++		for (uint32_t i = 0; i < size / 4; i++) {
++			zero[i] = 0;
++		}
+ 	}
+ 
+ 	bo->kva = gpu_arena_kva(off);
