@@ -1,9 +1,9 @@
 --- a/bsd/dev/sweet_gpu.c
 +++ b/bsd/dev/sweet_gpu.c
-@@ -2214,6 +2214,105 @@
+@@ -2213,6 +2213,104 @@
+  * writes through it. gpu_arena_used is shared with gpu_bo_alloc() so the two never overlap;
   * like the chardev BOs these pages are never returned (bump allocator).
   */
- bool
 +/*
 + * Buffers larger than the payload's arena blob: IOKit hands back at most about a megabyte of
 + * physically contiguous memory here, so a buffer is composed of several chunks and mapped page
@@ -49,7 +49,7 @@
 +	uint64_t at = 0;
 +
 +	if (l == NULL) {
-+		return bo_pa + off;             /* a single arena or contiguous buffer */
++		return bo_pa + off;             /* one arena or one contiguous buffer */
 +	}
 +	for (unsigned i = 0; i < l->n; i++) {
 +		if (off < at + l->bytes[i]) {
@@ -66,7 +66,7 @@
 +	struct gpu_chunklist *l;
 +	uint64_t done = 0;
 +
-+	l = gpu_chunklist_for(0xdeadbeefull, true);     /* reserve a slot, pa filled after */
++	l = gpu_chunklist_for(0xdeadbeefull, true);
 +	if (l == NULL) {
 +		return false;
 +	}
@@ -102,11 +102,10 @@
 +	    (unsigned long long)size, l->n, (unsigned long long)l->pa[0]);
 +	return true;
 +}
-+
+ bool
  sweet_gpu_alloc_pages(uint64_t size, uint64_t *pa, void **kva)
  {
- 	uint64_t sz = (size + 0xfffull) & ~0xfffull;
-@@ -2226,7 +2325,11 @@
+@@ -2226,7 +2324,11 @@
  		 * allocates, IOKit's allocator is up, and what these buffers need is only that each
  		 * one be physically contiguous: mapGem() walks it a page at a time from pa.
  		 */
