@@ -1,0 +1,66 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -585,6 +585,7 @@
+  * here), and Metal asks for buffers of many MiB. IOKit's allocator hands back physically
+  * contiguous memory or NULL - it does not panic the way kmem_alloc does in this port. */
+ extern void *IOMallocContiguous(vm_size_t size, vm_size_t alignment, addr64_t *physicalAddress);
++extern void IOFreeContiguous(void *address, vm_size_t size);
+ 
+ static addr64_t gpu_run_arena_pa;
+ static vm_size_t gpu_run_arena_bytes;
+@@ -767,6 +768,26 @@
+ 		return NULL;
+ 	}
+ 	if (gpu_arena_used + size > gpu_arena_size) {
++		addr64_t phys = 0;
++		void *k = IOMallocContiguous(size, 0x4000, &phys);
++
++		if (k != NULL && phys != 0) {
++			memset(k, 0, size);
++			bo->kva = k;
++			bo->pa = phys;
++			bo->size = size;
++			bo->va = gpu_va_next;
++			bo->handle = next_handle++;
++			bo->used = true;
++			gpu_va_next += size + 0x1000;
++			if (!gpu_pt_map(bo->va, bo->pa, size)) {
++				bo->used = false;
++				return NULL;
++			}
++			printf("SWEET GPU: bo: %lu bytes contig pa %#llx va %#x handle %u\n",
++			    (unsigned long)size, (unsigned long long)bo->pa, bo->va, bo->handle);
++			return bo;
++		}
+ 		printf("SWEET GPU: bo: %lu bytes do not fit the %u KiB arena (%u used)\n",
+ 		    (unsigned long)size, gpu_arena_size / 1024, gpu_arena_used);
+ 		return NULL;
+@@ -2199,6 +2220,28 @@
+ 	uint32_t off;
+ 
+ 	if (!gpu_live || gpu_arena_window_bytes == 0 || sz == 0 || sz > gpu_arena_size) {
++		/*
++		 * The payload blob bounds the arena at about 1 MiB (the boot image is capped near
++		 * 15 MB), and Metal asks freedreno for buffers of many MiB. By the time a client
++		 * allocates, IOKit's allocator is up, and what these buffers need is only that each
++		 * one be physically contiguous: mapGem() walks it a page at a time from pa.
++		 */
++		if (gpu_live && gpu_arena_window_bytes != 0 && sz != 0 && sz <= (64ull << 20)) {
++			addr64_t phys = 0;
++			void *k = IOMallocContiguous((vm_size_t)sz, 0x4000, &phys);
++
++			if (k != NULL && phys != 0) {
++				memset(k, 0, (size_t)sz);
++				*pa = phys;
++				*kva = k;
++				printf("SWEET GPU: contig: %llu bytes pa %#llx kva %p (arena is %u KiB)\n",
++				    (unsigned long long)sz, (unsigned long long)phys, k,
++				    gpu_arena_size / 1024);
++				return true;
++			}
++			printf("SWEET GPU: contig: %llu bytes refused by IOKit\n",
++			    (unsigned long long)sz);
++		}
+ 		return false;
+ 	}
+ 	if (!gpu_arena_take((uint32_t)sz, &off)) {
