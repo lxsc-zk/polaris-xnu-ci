@@ -51,7 +51,7 @@
  	}
  
  	bo->kva = gpu_arena_kva(off);
-@@ -2369,12 +2393,20 @@
+@@ -2369,18 +2393,26 @@
  		    (unsigned long long)sz, gpu_arena_used, gpu_arena_size);
  		return false;
  	}
@@ -77,3 +77,10 @@
  		/* No alias for this one: the payload blob is built zeroed and the client writes it. */
  		printf("SWEET GPU: arena: %llu bytes at arena+%#x without a kernel alias\n",
  		    (unsigned long long)sz, off);
+ 	}
+ 	*pa = gpu_arena_pa + off;
+-	*kva = (void *)alias;
++	*kva = (void *)gpu_arena_kva(off);
+ 	printf("SWEET GPU: arena: %llu bytes at arena+%#x pa %#llx\n",
+ 	    (unsigned long long)sz, off, (unsigned long long)*pa);
+ 	return true;
