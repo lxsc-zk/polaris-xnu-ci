@@ -1,0 +1,13 @@
+--- a/osfmk/arm/caches.c
++++ b/osfmk/arm/caches.c
+@@ -72,6 +72,10 @@
+ 		if (phys) {
+ 			count = length;
+ 			paddr = CAST_DOWN(pmap_paddr_t, addr);
++			if (paddr < gPhysBase) {
++				printf("SWEET MEM: low PA %#llx in flush_dcache, caller %p len %u\n",
++				    (unsigned long long)paddr, __builtin_return_address(0), length);
++			}
+ 			vaddr = phystokv_range(paddr, &count);
+ 		} else {
+ 			paddr = kvtophys(addr);
