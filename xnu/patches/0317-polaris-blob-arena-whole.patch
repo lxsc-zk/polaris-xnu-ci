@@ -1,0 +1,17 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -677,10 +677,11 @@
+ 		 * at the 1 MiB that is known to map, map nothing up front, and let the alias-less
+ 		 * paths below handle zeroing.
+ 		 */
+-		gpu_arena_window_bytes = 0x100000u;
++		/* The blob arena is 1 MiB and is mapped whole, which is what works here. */
++		gpu_arena_window_bytes = gpu_arena_size;
+ 		gpu_arena_windows[0] = (gpu_run_arena_kva != NULL) ? (vm_offset_t)gpu_run_arena_kva
+-		    : 0;
+-		if (gpu_arena_windows[0] == 0 && gpu_run_arena_pa == 0) {
++		    : ml_io_map((vm_offset_t)pa, (vm_size_t)gpu_arena_size);
++		if (gpu_arena_windows[0] == 0) {
+ 			printf("SWEET GPU: cannot map the %u KiB arena\n", gpu_arena_size / 1024);
+ 			gpu_arena_window_bytes = 0;
+ 			return false;
