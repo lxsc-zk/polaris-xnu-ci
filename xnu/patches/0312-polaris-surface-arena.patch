@@ -4,7 +4,7 @@
  	return ok;
  }
  
-+extern bool sweet_gpu_alloc_pages(uint64_t size, uint64_t *pa, void **kva);
++extern "C" bool sweet_gpu_alloc_pages(uint64_t size, uint64_t *pa, void **kva);
 +
  SweetSurface *
  sweet_surface_create_physical(uint64_t phys, uint32_t width, uint32_t height,
