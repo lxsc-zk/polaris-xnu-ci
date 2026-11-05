@@ -1,0 +1,50 @@
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -224,6 +224,8 @@
+ 	return ok;
+ }
+ 
++extern bool sweet_gpu_alloc_pages(uint64_t size, uint64_t *pa, void **kva);
++
+ SweetSurface *
+ sweet_surface_create_physical(uint64_t phys, uint32_t width, uint32_t height,
+     uint32_t bytesPerRow, uint32_t pixelFormat)
+@@ -685,17 +687,33 @@
+ 	s->parentID = args->scalarInputCount > 0 ? (uint32_t)args->scalarInput[0] : 0;
+ 	ret = sweet_surface_layout(s, props);
+ 	if (ret == kIOReturnSuccess) {
+-		IOBufferMemoryDescriptor *mem = NULL;
++		/*
++		 * Not IOBufferMemoryDescriptor: the kernel allocator hands out pages below gPhysBase
++		 * (0x100000000) in this port, and both pmap and ubc die on them (phys_to_kv_range, and
++		 * "offset not aligned to cshash boundary" at ubc_subr.c:5730). The GPU arena is real
++		 * DRAM above the base, which is the only memory the GPU path can touch.
++		 */
++		IOMemoryDescriptor *mem = NULL;
++		uint64_t surf_pa = 0;
++		void *surf_kva = NULL;
+ 		if ((uint64_t)OSAddAtomic64(s->allocSize, (volatile SInt64 *)&sweet_surface_wired) +
+-		    s->allocSize <= SWEET_SURFACE_WIRED_MAX) {
+-			mem = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
+-			    kIODirectionInOut | kIOMemoryKernelUserShared, s->allocSize, page_size);
++		    s->allocSize <= SWEET_SURFACE_WIRED_MAX &&
++		    sweet_gpu_alloc_pages(s->allocSize, &surf_pa, &surf_kva)) {
++			mem = IOMemoryDescriptor::withPhysicalAddress(
++			    (IOPhysicalAddress)surf_pa, (IOByteCount)s->allocSize, kIODirectionInOut);
+ 		}
+ 		if (mem == NULL) {
+ 			OSAddAtomic64(-(SInt64)s->allocSize, (volatile SInt64 *)&sweet_surface_wired);
+ 			ret = kIOReturnNoMemory;
+ 		} else {
+-			bzero(mem->getBytesNoCopy(), s->allocSize);
++			if (surf_kva != NULL) {
++				/* bzero() uses dc zva, which is not permitted on ml_io_map memory. */
++				volatile uint32_t *z = (volatile uint32_t *)surf_kva;
++
++				for (uint32_t i = 0; i < s->allocSize / 4; i++) {
++					z[i] = 0;
++				}
++			}
+ 			s->memory = mem;
+ 			s->mapCache = kIOMapDefaultCache;
+ 			if (!sweet_surface_publish(s)) {
