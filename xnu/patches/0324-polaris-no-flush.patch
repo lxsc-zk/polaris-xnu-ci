@@ -1,0 +1,19 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -730,9 +730,13 @@
+ 		 * unaligned-abort panic - and device memory is uncached, so it never needs a clean. Only buffers
+ 		 * in the linear-mapped range are cleaned.
+ 		 */
+-		if (g->pa >= 0x100000000ull && g->size != 0) {
+-			flush_dcache64((addr64_t)g->pa, (unsigned)g->size, TRUE);
+-		}
++		/*
++		 * Not flush_dcache64(pa, ..., TRUE): in this kernel that reaches the memory through
++		 * flush_dcache(), and the physical address arrives truncated to 32 bits
++		 * (0x141840000 became 0x41840000, then phystokv_range panicked). The buffers are
++		 * mapped uncached on the client side, so there is nothing dirty to write back here.
++		 */
++		(void)g;
+ 	}
+ 	/*
+ 	 * What the CP is about to read, through the uncached alias. The first two client command buffers are
