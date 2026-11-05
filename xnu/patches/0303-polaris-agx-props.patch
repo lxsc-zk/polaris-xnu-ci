@@ -1,0 +1,26 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -386,8 +386,22 @@
+ 		AGXAccelerator * agx = OSTypeAlloc(AGXAccelerator);
+ 
+ 		if (agx != NULL && agx->init() && agx->attach(this)) {
++			/*
++			 * fajita: backboardd matches this class too, and on iOS 16 it is the one
++			 * Metal's AGX driver looks at. Publishing it bare (as before) gets the
++			 * match and nothing else - the same plugin properties and a user client
++			 * have to be here as well, or Metal has nothing to open.
++			 */
++			uint32_t agxPlugin = 0;
++			(void) PE_parse_boot_argn("metalplugin", &agxPlugin, sizeof(agxPlugin));
++			const char *agxName  = agxPlugin ? "SweetBGMTL" : "SweetMetalProbe";
++			const char *agxClass = agxPlugin ? "BGMTLDevice" : "SweetMetalDevice";
++			agx->setProperty(kIOUserClientClassKey, "IOAcceleratorESUserClient");
++			agx->setProperty("MetalPluginName", agxName);
++			agx->setProperty("MetalPluginClassName", agxClass);
++			agx->setName("agx");
+ 			agx->registerService();
+-			IOLog("SWEET FB: published a stub AGXAccelerator\n");
++			IOLog("SWEET FB: AGXAccelerator published, MetalPluginName %s class %s\n", agxName, agxClass);
+ 		} else if (agx != NULL) {
+ 			agx->release();
+ 		} else {
