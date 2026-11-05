@@ -1,0 +1,70 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -597,6 +597,10 @@
+ extern void *IOMallocContiguous(vm_size_t size, vm_size_t alignment, addr64_t *physicalAddress);
+ extern void IOFreeContiguous(void *address, vm_size_t size);
+ 
++static uint64_t gpu_big_pa;
++static uint32_t gpu_big_size;
++static uint32_t gpu_big_used;
++
+ static addr64_t gpu_run_arena_pa;
+ static vm_size_t gpu_run_arena_bytes;
+ static void *gpu_run_arena_kva;
+@@ -626,9 +630,10 @@
+ 		if (PE_parse_boot_argn("gpuarena", arga, sizeof(arga)) &&
+ 		    gpu_parse_range(arga, &gpa, &gsz) && gpa >= 0x100000000ull &&
+ 		    gsz >= GPU_ARENA_BYTES && gsz <= GPU_ARENA_MAX_BYTES) {
+-			gpu_run_arena_kva = NULL;
+-			gpu_run_arena_pa = gpa;
+-			gpu_run_arena_bytes = (vm_size_t)gsz;
++			/* The big arena serves sweet_gpu_alloc_pages() only: it has no kernel alias. */
++			gpu_big_pa = gpa;
++			gpu_big_size = (uint32_t)gsz;
++			gpu_big_used = 0;
+ 			printf("SWEET GPU: arena from gpuarena %#llx (%llu MiB)\n",
+ 			    (unsigned long long)gpa, (unsigned long long)(gsz >> 20));
+ 		}
+@@ -639,10 +644,7 @@
+ 	 * the CP tests passed. The arena comes from gpuarena= or the sweetfw2 blob, both of which
+ 	 * are real DRAM above gPhysBase, which is the only memory pmap accepts here.
+ 	 */
+-	if (gpu_run_arena_bytes != 0) {
+-		pa = gpu_run_arena_pa;
+-		size = gpu_run_arena_bytes;
+-	} else if (!PE_parse_boot_argn("sweetfw2", arg, sizeof(arg)) ||
++	if (!PE_parse_boot_argn("sweetfw2", arg, sizeof(arg)) ||
+ 	    !gpu_parse_range(arg, &pa, &size) || size < GPU_ARENA_BYTES || size > GPU_ARENA_MAX_BYTES) {
+ 		printf("SWEET GPU: no sweetfw2 arena of %u KiB..%u MiB (got %llu); buffers unavailable\n",
+ 		    GPU_ARENA_BYTES / 1024, GPU_ARENA_MAX_BYTES >> 20, (unsigned long long)size);
+@@ -785,11 +787,6 @@
+ 	 * fails here (vm_kern.c:178). Refuse rather than hand out a NULL kva - the Metal client
+ 	 * takes the IOKit path and maps through clientMemoryForType().
+ 	 */
+-	if (gpu_arena_mapped_bytes == 0) {
+-		printf("SWEET GPU: bo: %lu bytes refused (arena has no kernel alias)\n",
+-		    (unsigned long)size);
+-		return NULL;
+-	}
+ 	for (unsigned i = 0; i < GPU_BO_MAX; i++) {
+ 		if (!gpu_bos[i].used) {
+ 			bo = &gpu_bos[i];
+@@ -2365,6 +2362,18 @@
+ 	uint64_t sz = (size + 0xfffull) & ~0xfffull;
+ 	uint32_t off;
+ 
++	if (gpu_big_size != 0 && sz != 0 && sz <= (uint64_t)gpu_big_size) {
++		uint32_t off = (gpu_big_used + 0xfffu) & ~0xfffu;
++		if ((uint64_t)off + sz <= gpu_big_size) {
++			gpu_big_used = off + (uint32_t)sz;
++			*pa = gpu_big_pa + off;
++			*kva = NULL;            /* no kernel alias: the client maps it */
++			printf("SWEET GPU: big arena: %llu bytes at +%#x pa %#llx\n",
++			    (unsigned long long)sz, off, (unsigned long long)*pa);
++			return true;
++		}
++		printf("SWEET GPU: big arena full (%u of %u used)\n", gpu_big_used, gpu_big_size);
++	}
+ 	if (!gpu_live || gpu_arena_window_bytes == 0 || sz == 0 || sz > gpu_arena_size) {
+ 		/*
+ 		 * The payload blob bounds the arena at about 1 MiB (the boot image is capped near
