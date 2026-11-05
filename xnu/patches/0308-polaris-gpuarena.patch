@@ -1,0 +1,38 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -603,6 +603,26 @@
+ 	for (unsigned i = 0; i < GPU_BO_MAX; i++) {
+ 		gpu_bos[i].used = false;
+ 	}
++	/*
++	 * The client allocator cannot help: this port's free lists carry pages below gPhysBase
++	 * (0x100000000) and pmap panics on those (phys_to_kv_range), which is exactly why the
++	 * arena comes from the payload - real memory above the base. gpuarena=<pa>:<size> points
++	 * it at DRAM past the payload instead, so the arena is not bounded by the boot image.
++	 */
++	{
++		char arga[64];
++		uint64_t gpa = 0, gsz = 0;
++
++		if (PE_parse_boot_argn("gpuarena", arga, sizeof(arga)) &&
++		    gpu_parse_range(arga, &gpa, &gsz) && gpa >= 0x100000000ull &&
++		    gsz >= GPU_ARENA_BYTES && gsz <= GPU_ARENA_MAX_BYTES) {
++			gpu_run_arena_kva = NULL;
++			gpu_run_arena_pa = gpa;
++			gpu_run_arena_bytes = (vm_size_t)gsz;
++			printf("SWEET GPU: arena from gpuarena %#llx (%llu MiB)\n",
++			    (unsigned long long)gpa, (unsigned long long)(gsz >> 20));
++		}
++	}
+ 	{
+ 		int want_mb = 0;
+ 
+@@ -654,7 +674,7 @@
+ 		 * works for command buffers of any size.
+ 		 */
+ 		gpu_arena_window_bytes = gpu_arena_size;
+-		gpu_arena_windows[0] = (gpu_run_arena_bytes != 0) ? (vm_offset_t)gpu_run_arena_kva
++		gpu_arena_windows[0] = (gpu_run_arena_kva != NULL) ? (vm_offset_t)gpu_run_arena_kva
+ 		    : ml_io_map((vm_offset_t)pa, (vm_size_t)gpu_arena_size);
+ 		if (gpu_arena_windows[0] == 0) {
+ 			printf("SWEET GPU: cannot map the %u KiB arena\n", gpu_arena_size / 1024);
