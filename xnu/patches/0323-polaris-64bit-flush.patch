@@ -1,0 +1,20 @@
+--- a/osfmk/arm/caches.c
++++ b/osfmk/arm/caches.c
+@@ -71,7 +71,7 @@
+ 	while (length > 0) {
+ 		if (phys) {
+ 			count = length;
+-			paddr = CAST_DOWN(pmap_paddr_t, addr);
++			paddr = (pmap_paddr_t)addr;
+ 			vaddr = phystokv_range(paddr, &count);
+ 		} else {
+ 			paddr = kvtophys(addr);
+@@ -105,7 +105,7 @@
+ 	while (length > 0) {
+ 		if (phys) {
+ 			count = length;
+-			paddr = CAST_DOWN(pmap_paddr_t, addr);
++			paddr = (pmap_paddr_t)addr;
+ 			vaddr = phystokv_range(paddr, &count);
+ 		} else {
+ 			paddr = kvtophys(addr);
