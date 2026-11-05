@@ -1,0 +1,27 @@
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -696,7 +696,24 @@
+ 		IOMemoryDescriptor *mem = NULL;
+ 		uint64_t surf_pa = 0;
+ 		void *surf_kva = NULL;
++		/*
++		 * VM memory first: a surface is mapped into the client (clientMemoryForType), and
++		 * only pages the pmap already owns can be mapped there - a carved-out arena takes
++		 * pmap_enter_pv: unexpected PV head (pmap_data.c:2393). The arena stays as the
++		 * fallback for the case where the VM refuses.
++		 */
++		IOBufferMemoryDescriptor *vmmem = NULL;
+ 		if ((uint64_t)OSAddAtomic64(s->allocSize, (volatile SInt64 *)&sweet_surface_wired) +
++		    s->allocSize <= SWEET_SURFACE_WIRED_MAX) {
++			vmmem = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++			    kIODirectionInOut, s->allocSize, page_size);
++			if (vmmem != NULL && vmmem->prepare(kIODirectionInOut) != kIOReturnSuccess) {
++				OSSafeReleaseNULL(vmmem);
++			}
++		}
++		if (vmmem != NULL) {
++			mem = vmmem;
++		} else if ((uint64_t)OSAddAtomic64(0, (volatile SInt64 *)&sweet_surface_wired) +
+ 		    s->allocSize <= SWEET_SURFACE_WIRED_MAX &&
+ 		    sweet_gpu_alloc_pages(s->allocSize, &surf_pa, &surf_kva)) {
+ 			mem = IOMemoryDescriptor::withPhysicalAddress(
