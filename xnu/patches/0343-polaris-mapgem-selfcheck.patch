@@ -1,0 +1,33 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -403,6 +403,30 @@
+ 		IOLog("SWEET GPU: cannot map %llu bytes into the GPU address space (page %llu)\n", size, mapped / PAGE_SIZE);
+ 		return kIOReturnNoMemory;
+ 	}
++	/*
++	 * Verify what we just wrote: every 4 KiB of the buffer must have a PTE, or the CP will
++	 * jump into a hole and wedge. The client's nested command buffer was exactly that - its
++	 * address read back as PTE 0 while the top-level buffer right next to it was mapped.
++	 */
++	{
++		uint32_t holes = 0;
++		uint64_t first_hole = 0;
++
++		for (uint64_t o = 0; o < size; o += 0x1000) {
++			if (sweet_gpu_vm_lookup(iova + o) == 0) {
++				if (holes == 0) {
++					first_hole = iova + o;
++				}
++				holes++;
++			}
++		}
++		if (holes != 0) {
++			IOLog("SWEET ADRENO: mapGem: %#llx + %llu has %u unmapped 4KiB pages, first %#llx\n",
++			    iova, size, holes, first_hole);
++		} else if (size >= 0x10000) {
++			IOLog("SWEET ADRENO: mapGem: %#llx + %llu fully mapped\n", iova, size);
++		}
++	}
+ 	slot->iova = iova;
+ 	slot->vaLen = taken;
+ 	slot->flags = flags;
