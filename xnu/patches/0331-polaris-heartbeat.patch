@@ -1,0 +1,57 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -1426,6 +1426,30 @@
+  * scratch mapping, not the GPU. The fault registers say which packet or access it died on.
+  */
+ void
++/*
++ * A heartbeat, so a black screen is never blind: every few seconds the driver
++ * says whether the GPU is idle, what the CP is doing, and how far the fences got.
++ */
++uint32_t sweet_gpu_fence_last(void);   /* defined below */
++
++void
++sweet_gpu_heartbeat(void)
++{
++	static uint32_t beat;
++	vm_offset_t core = gpu_core;
++
++	beat++;
++	if (core == 0) {
++		printf("SWEET HB %u: no core\n", beat);
++		return;
++	}
++	printf("SWEET HB %u: rbbm_status %#x cp_status1 %#x rptr %u wptr %u hw_fault %#x "
++	    "fence %u live %d\n", beat,
++	    gpu_cp_rd(core, A6XX_RBBM_STATUS), gpu_cp_rd(core, A6XX_CP_STATUS_1),
++	    gpu_cp_rd(core, A6XX_CP_RB_RPTR), gpu_cp_wptr,
++	    gpu_cp_rd(core, A6XX_CP_HW_FAULT), sweet_gpu_fence_last(), (int)gpu_live);
++}
++
+ sweet_gpu_dump_cp_state(const char *why)
+ {
+ 	vm_offset_t core = gpu_core;
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -36,7 +36,8 @@
+  */
+ #include "SweetSurface.h"
+ 
+-extern "C" int sweet_console_muted;     /* osfmk/console/serial_console.c */
++extern "C" int sweet_console_muted;
++extern "C" void sweet_gpu_heartbeat(void);   /* bsd/dev/sweet_gpu.c */     /* osfmk/console/serial_console.c */
+ 
+ #if defined(SWEET)
+ #include <IOKit/IOService.h>
+@@ -483,6 +484,11 @@
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
+ 	uint64_t now = mach_absolute_time();
+ 	uint64_t count = ++fb->fVsyncCount;
++	/* Every 150 vsyncs at the 30 Hz the panel runs at: a 5 s GPU heartbeat. */
++	static unsigned hbTick;
++	if ((++hbTick % 150) == 0) {
++		sweet_gpu_heartbeat();
++	}
+ 	uint64_t values[6] = {
+ 		(uint32_t)count, (uint32_t)(count >> 32),
+ 		(uint32_t)now, (uint32_t)(now >> 32),
