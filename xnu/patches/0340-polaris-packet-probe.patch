@@ -1,0 +1,195 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -791,152 +791,55 @@
+ 		 * never wrote, which is exactly what a CP that reads the whole ring and then wedges
+ 		 * looks like. Read the same dwords through a fresh uncached window and compare.
+ 		 */
++		/*
++		 * Walk the client's command buffer packet by packet, submitting a prefix that ends on
++		 * a packet boundary each time. The first prefix that does not retire names the packet
++		 * that wedges the CP: a truncated stream that ends mid-packet only makes the CP wait
++		 * for a payload that never comes, which is what earlier truncation runs measured.
++		 */
+ 		{
+ 			static bool probed;
+ 
+-			if (!probed) {
+-				uint32_t off = cmds[0].submit_offset & ~(uint32_t)(PAGE_SIZE - 1);
+-				IOByteCount seglen = 0;
+-				uint64_t pa = (uint64_t)cb->md->getPhysicalSegment(off, &seglen,
+-				    kIOMemoryMapperNone);
++			if (!probed && ibn[0] > 0 && ibn[0] <= 4096) {
++				struct sweet_gem *cb = objs[cmds[0].submit_idx];
++				volatile uint32_t *q =
++				    (volatile uint32_t *)(void *)(cb->kva + cmds[0].submit_offset);
++				uint32_t total = ibn[0], off = 0;
+ 
+ 				probed = true;
+-				if (pa != 0) {
+-					vm_offset_t raw = ml_io_map((vm_offset_t)pa, PAGE_SIZE);
+-
+-					if (raw != 0) {
+-						volatile uint32_t *c = (volatile uint32_t *)(void *)(cb->kva + cmds[0].submit_offset);
+-						volatile uint32_t *r = (volatile uint32_t *)(void *)
+-						    (raw + (cmds[0].submit_offset & (PAGE_SIZE - 1)));
+-
+-						IOLog("SWEET ADRENO: coherency: cpu %#x %#x %#x %#x | mem %#x %#x %#x %#x -> %s\n",
+-						    c[0], c[1], c[2], c[3], r[0], r[1], r[2], r[3],
+-						    (c[0] == r[0] && c[1] == r[1] && c[2] == r[2] &&
+-						    c[3] == r[3]) ? "same" : "DIFFERENT");
++				while (off < total) {
++					uint32_t h = q[off];
++					uint32_t words;
++
++					if ((h & 0xf0000000u) == 0x40000000u) {
++						words = 1 + (h & 0xfu);         /* type 4: count in the low nibble */
++					} else if ((h & 0xf0000000u) == 0x70000000u) {
++						words = 1 + (h & 0x3fffu);      /* type 7 */
++					} else {
++						IOLog("SWEET ADRENO: packet probe: stop at %u, header %#x is not PM4\n",
++						    off, h);
++						break;
+ 					}
+-				}
+-			}
+-		}
+-		if (full_dumps < 2) {
+-			full_dumps++;
+-			if (n > 384) {
+-				n = 384;
+-			}
+-			IOLog("SWEET ADRENO: ib %#llx full, %u dwords\n", cb->iova, n);
+-			for (uint32_t i = 0; i + 8 <= n; i += 8) {
+-				IOLog("SWEET ADRENO: %03u: %#010x %#010x %#010x %#010x %#010x %#010x %#010x %#010x\n",
+-				    i, q[i], q[i + 1], q[i + 2], q[i + 3], q[i + 4], q[i + 5], q[i + 6],
+-				    q[i + 7]);
+-			}
+-			/*
+-			 * Follow CP_INDIRECT_BUFFER. The client stream is mostly a shell around nested
+-			 * buffers (the first real submission was 72 dwords that jumped into a 196-dword
+-			 * buffer), and the CP wedges inside them - so the nested stream is what has to be
+-			 * read to see the state that stops it.
+-			 */
+-			for (uint32_t i = 0; i + 3 < n; i++) {
+-				uint32_t h = q[i];
+-
+-				if ((h & 0xf0000000u) != 0x70000000u) {
+-					continue;
+-				}
+-				uint32_t cnt = h & 0x3fffu;
+-				uint32_t op = (h >> 16) & 0x7fu;
+-
+-				if (op != 0x3f || cnt < 3 || i + 3 >= n) {
+-					continue;
+-				}
+-				uint64_t va = (uint64_t)q[i + 1] | ((uint64_t)q[i + 2] << 32);
+-				uint32_t words = q[i + 3];
+-				for (uint32_t g2 = 0; g2 < GEM_MAX; g2++) {
+-					struct sweet_gem *tg = &fGems[g2];
+-
+-					if (tg->md == NULL || tg->kva == NULL || va < tg->iova ||
+-					    va >= tg->iova + tg->size) {
+-						continue;
++					if (off + words > total) {
++						words = total - off;
+ 					}
+-					volatile uint32_t *rq =
+-					    (volatile uint32_t *)(void *)(tg->kva + (va - tg->iova));
+-					uint32_t m = words > 64 ? 64 : words;
+-
+-					IOLog("SWEET ADRENO:   nested ib %#llx at %u, %u dwords\n", va, i, words);
+-					for (uint32_t k = 0; k + 8 <= m; k += 8) {
+-						IOLog("SWEET ADRENO:   n%03u: %#010x %#010x %#010x %#010x %#010x %#010x %#010x %#010x\n",
+-						    k, rq[k], rq[k + 1], rq[k + 2], rq[k + 3], rq[k + 4],
+-						    rq[k + 5], rq[k + 6], rq[k + 7]);
++					uint64_t va = ib[0];
++					uint32_t prefix = off + words;
++					uint32_t pf = sweet_gpu_submit(&va, &prefix, 1);
++
++					if (pf == 0) {
++						IOLog("SWEET ADRENO: packet probe: %u..%u hdr %#x: no fence\n",
++						    off, prefix - 1, h);
++						break;
+ 					}
+-					break;
+-				}
+-				i += cnt;
+-			}
+-		}
+-	}
+-	/*
+-	 * fajita (ibounce=1): submit a copy of the command buffer from memory the driver owns. The same
+-	 * dwords retire their fence when submitted that way from the bring-up test, so this separates
+-	 * "the stream wedges the pipe" from "the CP does not read the client's memory as the CPU does".
+-	 */
+-	{
+-		int bounce = 0;
++					bool ok = waitFence(pf, 3000000000ULL);
+ 
+-		if (PE_parse_boot_argn("ibounce", &bounce, sizeof(bounce)) && bounce != 0) {
+-			for (uint32_t i = 0; i < r->nr_cmds; i++) {
+-				struct sweet_gem *cb = objs[cmds[i].submit_idx];
+-				uint64_t bva = sweet_gpu_bounce_ib(cb->kva + cmds[i].submit_offset, ibn[i]);
+-
+-				if (bva != 0) {
+-					IOLog("SWEET ADRENO: ib %u bounced: %#llx -> %#llx, %u dwords\n",
+-					    i, (unsigned long long)ib[i], (unsigned long long)bva, ibn[i]);
+-					ib[i] = bva;
+-					break;          /* one page: only the first command buffer */
+-				}
+-			}
+-		}
+-	}
+-	/*
+-	 * fajita (ibtrunc=N): submit only the first N dwords of every command buffer. The fence is appended by
+-	 * sweet_gpu_submit() to the *ring*, not to the client's buffer, so a truncated stream still gets a fence -
+-	 * which makes this a bisection: the shortest prefix that wedges the CP names the packet that does it, and
+-	 * a prefix that ends just before a CP_INDIRECT_BUFFER separates "the packets before it" from "whatever
+-	 * that nested buffer contains" (the window server's binning pass, at offset 11 of its first buffer).
+-	 */
+-	{
+-		int trunc = 0;
+-
+-		if (PE_parse_boot_argn("ibtrunc", &trunc, sizeof(trunc)) && trunc > 0) {
+-			for (uint32_t i = 0; i < r->nr_cmds; i++) {
+-				if (ibn[i] > (uint32_t)trunc) {
+-					IOLog("SWEET ADRENO: ib %u truncated %u -> %d dwords\n", i, ibn[i], trunc);
+-					ibn[i] = (uint32_t)trunc;
+-				}
+-			}
+-		}
+-	}
+-	{
+-		/*
+-		 * Can the CP execute the client's buffer at all? Submit a command buffer that is
+-		 * ours (so the ring path is known good) whose only content is CP_INDIRECT_BUFFER
+-		 * into the *client's* first command buffer, two dwords long: exactly the packet that
+-		 * wedges. A retired fence here means the client's VA is readable and the fault is in
+-		 * the stream; a timeout means the client's SMMU mapping is what is wrong.
+-		 */
+-		{
+-			static bool probed;
+-
+-			if (!probed) {
+-				uint64_t probe_va = ib[0];
+-				uint32_t probe_words = 2;
+-				uint32_t pf = 0;
+-
+-				probed = true;
+-				pf = sweet_gpu_submit(&probe_va, &probe_words, 1);
+-				IOLog("SWEET ADRENO: client-ib probe: va %#llx 2 dwords -> fence %u\n",
+-				    probe_va, pf);
+-				if (pf != 0) {
+-					bool ok = waitFence(pf, 5000000000ULL);
+-
+-					IOLog("SWEET ADRENO: client-ib probe: %s\n",
+-					    ok ? "retired" : "TIMED OUT (client buffer not readable by the CP)");
++					IOLog("SWEET ADRENO: packet probe: %u..%u hdr %#x (%u dwords): %s\n",
++					    off, prefix - 1, h, words, ok ? "ok" : "TIMED OUT");
++					if (!ok) {
++						break;
++					}
++					off = prefix;
+ 				}
+ 			}
+ 		}
