@@ -1,0 +1,43 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -83,6 +83,7 @@
+ 	IOBufferMemoryDescriptor *buf;          /* == md for BOs made by GEM_NEW, else NULL */
+ 	SweetSurface             *surface;      /* retained for surface BOs */
+ 	uint8_t                  *kva;          /* kernel alias (write-combined for GEM_NEW BOs) */
++	IOMemoryMap              *kmap;         /* our mapping of a VM-backed BO, kept while it lives */
+ 	uint64_t                  pa;           /* arena physical address for GEM_NEW BOs, else 0 */
+ 	uint64_t                  size;
+ 	uint64_t                  iova;
+@@ -438,6 +439,19 @@
+ 		}
+ 	}
+ 	uint8_t *kva = (uint8_t *)akva;
++	IOMemoryMap *kmap = NULL;
++	/*
++	 * A BO whose memory came from the VM has no kernel alias yet, and submit() writes
++	 * relocations and clear values through kva (NULL + offset is a data abort at 0). Map it
++	 * into the kernel here and keep the map for as long as the slot lives; the client still
++	 * maps the same descriptor through clientMemoryForType.
++	 */
++	if (kva == NULL && buf != NULL) {
++		kmap = buf->createMappingInTask(kernel_task, 0, kIODirectionInOut | kIOMapAnywhere);
++		if (kmap != NULL) {
++			kva = (uint8_t *)kmap->getAddress();
++		}
++	}
+ 	/*
+ 	 * Not bzero(): bzero uses dc zva (osfmk/arm64/bzero.s), and dc zva is not permitted on
+ 	 * I/O mapped memory - the arena comes from ml_io_map, so it faults (unaligned kernel data
+@@ -457,10 +471,12 @@
+ 				bzero(g, sizeof(*g));
+ 				g->md = buf;
+ 				g->kva = kva;
++				g->kmap = kmap;
+ 				g->pa = pa;
+ 				g->size = size;
+ 				ret = mapGem(g, r->flags, &r->handle, 0);
+ 				if (ret != kIOReturnSuccess) {
++					OSSafeReleaseNULL(g->kmap);
+ 					bzero(g, sizeof(*g));
+ 				} else {
+ 					fNextGem = i + 1;
