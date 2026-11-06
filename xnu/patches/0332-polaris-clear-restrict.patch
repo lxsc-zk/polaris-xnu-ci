@@ -1,0 +1,16 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -1395,6 +1395,13 @@
+ 		    CS_FORCED_LV | CS_ENTITLEMENTS_VALIDATED | CS_NO_UNTRUSTED_HELPERS | CS_RUNTIME |
+ 		    CS_ENTITLEMENT_FLAGS |
+ 		    CS_EXEC_SET_HARD | CS_EXEC_SET_KILL | CS_EXEC_SET_ENFORCEMENT);
++		/*
++		 * This port needs to inject one dylib (the Metal implementation) into
++		 * backboardd, and dyld refuses DYLD_INSERT_LIBRARIES for restricted platform
++		 * binaries. Re-signing Apple's binary is not possible here, so drop the two flags
++		 * dyld consults. Only the launchd-supplied environment is affected.
++		 */
++		imgp->ip_csflags &= ~(CS_RESTRICT | CS_REQUIRE_LV);
+ 	} else {
+ 		imgp->ip_csflags &= ~CS_VALID;
+ 	}
