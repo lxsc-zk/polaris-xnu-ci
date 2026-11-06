@@ -1,16 +1,9 @@
 --- a/bsd/dev/sweet_gpu.c
 +++ b/bsd/dev/sweet_gpu.c
-@@ -1426,6 +1426,30 @@
+@@ -1426,6 +1426,24 @@
   * scratch mapping, not the GPU. The fault registers say which packet or access it died on.
   */
  void
-+/*
-+ * A heartbeat, so a black screen is never blind: every few seconds the driver
-+ * says whether the GPU is idle, what the CP is doing, and how far the fences got.
-+ */
-+uint32_t sweet_gpu_fence_last(void);   /* defined below */
-+
-+void
 +sweet_gpu_heartbeat(void)
 +{
 +	static uint32_t beat;
@@ -21,13 +14,14 @@
 +		printf("SWEET HB %u: no core\n", beat);
 +		return;
 +	}
-+	printf("SWEET HB %u: rbbm_status %#x cp_status1 %#x rptr %u wptr %u hw_fault %#x "
-+	    "fence %u live %d\n", beat,
-+	    gpu_cp_rd(core, A6XX_RBBM_STATUS), gpu_cp_rd(core, A6XX_CP_STATUS_1),
++	printf("SWEET HB %u: rbbm_status %#x cp_status1 %#x rptr %u wptr %u hw_fault %#x irq %#x live %d\n",
++	    beat, gpu_cp_rd(core, A6XX_RBBM_STATUS), gpu_cp_rd(core, A6XX_CP_STATUS_1),
 +	    gpu_cp_rd(core, A6XX_CP_RB_RPTR), gpu_cp_wptr,
-+	    gpu_cp_rd(core, A6XX_CP_HW_FAULT), sweet_gpu_fence_last(), (int)gpu_live);
++	    gpu_cp_rd(core, A6XX_CP_HW_FAULT), gpu_cp_rd(core, A6XX_CP_INTERRUPT_STATUS),
++	    (int)gpu_live);
 +}
 +
++void
  sweet_gpu_dump_cp_state(const char *why)
  {
  	vm_offset_t core = gpu_core;
