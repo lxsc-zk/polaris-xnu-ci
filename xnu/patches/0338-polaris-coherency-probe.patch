@@ -1,6 +1,14 @@
 --- a/iokit/Kernel/arm/SweetAdreno.cpp
 +++ b/iokit/Kernel/arm/SweetAdreno.cpp
-@@ -783,6 +783,39 @@
+@@ -39,6 +39,7 @@
+ #include "SweetSurface.h"
+ 
+ extern "C" {
++extern "C" vm_offset_t ml_io_map(vm_offset_t, vm_size_t);   /* osfmk/vm */
+ /* bsd/dev/sweet_a630.c: the kept-up GPU. Not thread safe; this file holds gAdrenoLock around every call. */
+ bool sweet_gpu_ready(void);
+ bool sweet_gpu_param(uint32_t which, uint64_t *value);
+@@ -783,6 +784,39 @@
  
  		IOLog("SWEET ADRENO: ib %#llx: %#x %#x %#x %#x %#x %#x %#x %#x\n", cb->iova,
  		    q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]);
@@ -25,7 +33,7 @@
 +					vm_offset_t raw = ml_io_map((vm_offset_t)pa, PAGE_SIZE);
 +
 +					if (raw != 0) {
-+						volatile uint32_t *c = cb->kva + cmds[0].submit_offset;
++						volatile uint32_t *c = (volatile uint32_t *)(void *)(cb->kva + cmds[0].submit_offset);
 +						volatile uint32_t *r = (volatile uint32_t *)(void *)
 +						    (raw + (cmds[0].submit_offset & (PAGE_SIZE - 1)));
 +
