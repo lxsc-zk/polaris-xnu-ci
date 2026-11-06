@@ -1,0 +1,16 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -1800,6 +1800,13 @@
+ 		{ 0x8864u, 0x0u,      "RB_ALPHA_CONTROL" },
+ 		{ 0x8880u, 0x49705u,  "RB_STENCIL_CONTROL" },
+ 		{ 0x8115u, 0x0u,      "unnamed 0x8115" },
++		/*
++		 * The client's first nested command buffer wedges on exactly this write, while the
++		 * CPU can write the same register and read it back. Sending it down the CP ring the
++		 * way the register tests above do separates "the CP refuses this register" from
++		 * "the client's command buffer never reaches the CP".
++		 */
++		{ 0x8e04u, 0x04100000u, "RB_DBG_ECO_CNTL" },
+ 	};
+ 	volatile uint32_t *ib = (volatile uint32_t *)(blob + GPU_ARENA_DATA + 0x1000);
+ 	bool all = true;
