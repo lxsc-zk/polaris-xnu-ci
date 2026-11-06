@@ -1,0 +1,36 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -913,6 +913,33 @@
+ 		}
+ 	}
+ 	{
++		/*
++		 * Can the CP execute the client's buffer at all? Submit a command buffer that is
++		 * ours (so the ring path is known good) whose only content is CP_INDIRECT_BUFFER
++		 * into the *client's* first command buffer, two dwords long: exactly the packet that
++		 * wedges. A retired fence here means the client's VA is readable and the fault is in
++		 * the stream; a timeout means the client's SMMU mapping is what is wrong.
++		 */
++		{
++			static bool probed;
++
++			if (!probed) {
++				uint64_t probe_va = ib[0];
++				uint32_t probe_words = 2;
++				uint32_t pf = 0;
++
++				probed = true;
++				pf = sweet_gpu_submit(&probe_va, &probe_words, 1);
++				IOLog("SWEET ADRENO: client-ib probe: va %#llx 2 dwords -> fence %u\n",
++				    probe_va, pf);
++				if (pf != 0) {
++					bool ok = waitFence(pf, 5000000000ULL);
++
++					IOLog("SWEET ADRENO: client-ib probe: %s\n",
++					    ok ? "retired" : "TIMED OUT (client buffer not readable by the CP)");
++				}
++			}
++		}
+ 		uint32_t fence = sweet_gpu_submit(ib, ibn, r->nr_cmds);
+ 		if (fence == 0) {
+ 			ret = kIOReturnNoResources;
