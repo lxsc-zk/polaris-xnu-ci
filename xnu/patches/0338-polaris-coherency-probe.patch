@@ -1,0 +1,42 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -783,6 +783,39 @@
+ 
+ 		IOLog("SWEET ADRENO: ib %#llx: %#x %#x %#x %#x %#x %#x %#x %#x\n", cb->iova,
+ 		    q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]);
++		/*
++		 * Coherency probe. The client writes its command buffer through a mapping we hand
++		 * it, and our relocation writes go through the BO's kernel alias; the CP reads the
++		 * memory itself. If either path is cacheable the CP can execute something the CPU
++		 * never wrote, which is exactly what a CP that reads the whole ring and then wedges
++		 * looks like. Read the same dwords through a fresh uncached window and compare.
++		 */
++		{
++			static bool probed;
++
++			if (!probed) {
++				uint32_t off = cmds[0].submit_offset & ~(uint32_t)(PAGE_SIZE - 1);
++				IOByteCount seglen = 0;
++				uint64_t pa = (uint64_t)cb->md->getPhysicalSegment(off, &seglen,
++				    kIOMemoryMapperNone);
++
++				probed = true;
++				if (pa != 0) {
++					vm_offset_t raw = ml_io_map((vm_offset_t)pa, PAGE_SIZE);
++
++					if (raw != 0) {
++						volatile uint32_t *c = cb->kva + cmds[0].submit_offset;
++						volatile uint32_t *r = (volatile uint32_t *)(void *)
++						    (raw + (cmds[0].submit_offset & (PAGE_SIZE - 1)));
++
++						IOLog("SWEET ADRENO: coherency: cpu %#x %#x %#x %#x | mem %#x %#x %#x %#x -> %s\n",
++						    c[0], c[1], c[2], c[3], r[0], r[1], r[2], r[3],
++						    (c[0] == r[0] && c[1] == r[1] && c[2] == r[2] &&
++						    c[3] == r[3]) ? "same" : "DIFFERENT");
++					}
++				}
++			}
++		}
+ 		if (full_dumps < 2) {
+ 			full_dumps++;
+ 			if (n > 384) {
