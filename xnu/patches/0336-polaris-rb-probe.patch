@@ -1,0 +1,21 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -1517,6 +1517,18 @@
+ 	gpu_cp_wr(core, 0x0e17u, 0x4);          /* UCHE_CACHE_WAYS */
+ 	gpu_cp_wr(core, 0x0e18u, 0x804);        /* UCHE_FILTER_CNTL */
+ 	printf("SWEET GPU: 3d init: vbif qos, perfctr mask, uche cached\n");
++	/*
++	 * The client's stream wedges on exactly this register: RB_DBG_ECO_CNTL (0x8e04)
++	 * written with 0x04100000 is the first packet of the first nested command buffer, and
++	 * the CP stops there with the ring fully read and no fence. Write it from the CPU here
++	 * to separate "the register is not ready for anyone" from "the CP's write of it is
++	 * refused" (CP_PROTECT, or a closed context).
++	 */
++	printf("SWEET GPU: 3d probe: writing RB_DBG_ECO_CNTL 0x04100000\n");
++	gpu_cp_wr(core, 0x8e04u, 0x04100000u);
++	printf("SWEET GPU: 3d probe: RB_DBG_ECO_CNTL reads %#x, rbbm_status %#x, cp_status1 %#x\n",
++	    gpu_cp_rd(core, 0x8e04u), gpu_cp_rd(core, A6XX_RBBM_STATUS),
++	    gpu_cp_rd(core, A6XX_CP_STATUS_1));
+ }
+ 
+ static bool
