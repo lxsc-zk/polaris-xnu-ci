@@ -1,0 +1,11 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -804,7 +804,7 @@
+ 
+ 		if (k != NULL && phys != 0) {
+ 			memset(k, 0, size);
+-			bo->kva = k;
++			bo->kva = (vm_offset_t)k;
+ 			bo->pa = phys;
+ 			bo->size = size;
+ 			bo->va = gpu_va_next;
