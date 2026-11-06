@@ -1,0 +1,12 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -808,6 +808,9 @@
+ 				uint32_t total = ibn[0], off = 0;
+ 
+ 				probed = true;
++				IOLog("SWEET ADRENO: packet probe: control pte(ib %#llx) = %#llx, pte(+0x1600) = %#llx\n",
++				    ib[0], sweet_gpu_vm_lookup(ib[0]),
++				    sweet_gpu_vm_lookup(ib[0] + 0x1600));
+ 				while (off < total) {
+ 					uint32_t h = q[off];
+ 					uint32_t words;
