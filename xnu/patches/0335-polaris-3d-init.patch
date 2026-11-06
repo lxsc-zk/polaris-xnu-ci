@@ -1,0 +1,67 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -1474,6 +1474,51 @@
+ 
+ /* a6xx_cp_init: enable the SQE (this starts the engine) and let it configure the
+  * ME. Completion is polled because RBBM_INT_0_MASK stays 0 - no interrupts. */
++/*
++ * a6xx_enable_64bit(): every block that walks memory needs its 64-bit address mode
++ * switched on, and a630 is the part this port drives. Without it the 3D blocks reject
++ * or wedge on the first register write the client makes - the first real Metal
++ * submission hung on RB_DBG_ECO_CNTL (0x8e04) with the ring fully read and the fence
++ * never retired, and the whole stream was fine once the indirect buffer was skipped.
++ * Offsets from a6xx.xml, values from the vendor driver (kgsl a6xx_enable_64bit).
++ */
++static void
++gpu_enable_64bit(vm_offset_t core)
++{
++	static const uint16_t addr_mode[] = {
++		0x0842u,        /* CP_ADDR_MODE_CNTL */
++		0x0c01u,        /* VSC_ADDR_MODE_CNTL */
++		0x8601u,        /* GRAS_ADDR_MODE_CNTL */
++		0x8e05u,        /* RB_ADDR_MODE_CNTL */
++		0x9e01u,        /* PC_ADDR_MODE_CNTL */
++		0xbe05u,        /* HLSQ_ADDR_MODE_CNTL */
++		0xa601u,        /* VFD_ADDR_MODE_CNTL */
++		0x9601u,        /* VPC_ADDR_MODE_CNTL */
++		0x0e00u,        /* UCHE_ADDR_MODE_CNTL */
++		0xae01u,        /* SP_ADDR_MODE_CNTL */
++		0xb601u,        /* TPL1_ADDR_MODE_CNTL */
++		0xf810u,        /* RBBM_SECVID_TSB_ADDR_MODE_CNTL */
++	};
++
++	for (unsigned int i = 0; i < sizeof(addr_mode) / sizeof(addr_mode[0]); i++) {
++		gpu_cp_wr(core, addr_mode[i], 1);
++	}
++	printf("SWEET GPU: 3d init: 64-bit addressing on for %u blocks\n",
++	    (unsigned)(sizeof(addr_mode) / sizeof(addr_mode[0])));
++}
++
++/* The rest of what a6xx_start() leaves behind that the 3D pipe reads back. */
++static void
++gpu_3d_init(vm_offset_t core)
++{
++	gpu_enable_64bit(core);
++	gpu_cp_wr(core, 0x0010u, 0x3);          /* RBBM_VBIF_CLIENT_QOS_CNTL */
++	gpu_cp_wr(core, 0x050bu, 0xffffffffu);  /* RBBM_PERFCTR_GPU_BUSY_MASKED */
++	gpu_cp_wr(core, 0x0e17u, 0x4);          /* UCHE_CACHE_WAYS */
++	gpu_cp_wr(core, 0x0e18u, 0x804);        /* UCHE_FILTER_CNTL */
++	printf("SWEET GPU: 3d init: vbif qos, perfctr mask, uche cached\n");
++}
++
+ static bool
+ gpu_cp_start(vm_offset_t core, vm_offset_t ring)
+ {
+@@ -1492,7 +1537,11 @@
+ 	gpu_ring_emit(ring, 0);
+ 	gpu_ring_flush(core, gpu_cp_wptr);
+ 
+-	return gpu_ring_wait_idle(core, "CP_ME_INIT");
++	if (!gpu_ring_wait_idle(core, "CP_ME_INIT")) {
++		return false;
++	}
++	gpu_3d_init(core);
++	return true;
+ }
+ 
+ /* The first packets this kernel would ever submit: a NOP, a write into the
