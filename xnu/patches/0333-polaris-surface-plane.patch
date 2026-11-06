@@ -1,0 +1,18 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -941,7 +941,14 @@
+ 	r->width = s->width;
+ 	r->height = s->height;
+ 	r->pixel_format = s->pixelFormat;
+-	r->planes = s->planeCount;
++	/*
++	 * Report a single plane to the Metal import path. QuartzCore creates its layer surfaces with
++	 * two IOSurfacePlaneInfo entries (two full-size planes), and air_metal.c refuses any surface
++	 * with sb.planes > 1 - which is what left every frame without a render target: backboardd
++	 * encoded 37 commands and dropped the buffer (black screen). The geometry handed out below
++	 * is plane 0's, which is the one the compositor draws into.
++	 */
++	r->planes = 1;
+ 	r->iova = 0;
+ 	if (r->handle == SWEET_GPU_DESCRIBE_ONLY) {
+ 		r->handle = 0;
