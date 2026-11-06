@@ -1,0 +1,70 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -1459,6 +1459,17 @@
+ 	    gpu_cp_rd(core, A6XX_CP_HW_FAULT), gpu_cp_rd(core, A6XX_CP_INTERRUPT_STATUS),
+ 	    gpu_cp_rd(core, A6XX_CP_PROTECT_STATUS), gpu_cp_rd(core, A6XX_RBBM_INT_0_STATUS),
+ 	    gpu_cp_rd(core, A6XX_CP_SQE_CNTL));
++	/*
++	 * Which indirect buffer the CP is inside, and how much of it is left. A ring that has
++	 * been fully read (rptr == wptr) with a fence that never retired means the CP is wedged
++	 * inside one of these, and IB1_REM_SIZE says exactly how far in. UniXNU's stallState()
++	 * captures the same set for the same reason.
++	 */
++	printf("SWEET GPU: %s: ib1 %#llx bufsz %u rem %u | ib2 %#llx bufsz %u rem %u\n", why,
++	    ((uint64_t)gpu_cp_rd(core, 0x0835u) << 32) | gpu_cp_rd(core, 0x0834u),
++	    gpu_cp_rd(core, 0x0836u), gpu_cp_rd(core, 0x083au),
++	    ((uint64_t)gpu_cp_rd(core, 0x0838u) << 32) | gpu_cp_rd(core, 0x0837u),
++	    gpu_cp_rd(core, 0x0839u), gpu_cp_rd(core, 0x083bu));
+ }
+ 
+ /* a6xx_cp_init: enable the SQE (this starts the engine) and let it configure the
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -794,6 +794,47 @@
+ 				    i, q[i], q[i + 1], q[i + 2], q[i + 3], q[i + 4], q[i + 5], q[i + 6],
+ 				    q[i + 7]);
+ 			}
++			/*
++			 * Follow CP_INDIRECT_BUFFER. The client stream is mostly a shell around nested
++			 * buffers (the first real submission was 72 dwords that jumped into a 196-dword
++			 * buffer), and the CP wedges inside them - so the nested stream is what has to be
++			 * read to see the state that stops it.
++			 */
++			for (uint32_t i = 0; i + 3 < n; i++) {
++				uint32_t h = q[i];
++
++				if ((h & 0xf0000000u) != 0x70000000u) {
++					continue;
++				}
++				uint32_t cnt = h & 0x3fffu;
++				uint32_t op = (h >> 16) & 0x7fu;
++
++				if (op != 0x3f || cnt < 3 || i + 3 >= n) {
++					continue;
++				}
++				uint64_t va = (uint64_t)q[i + 1] | ((uint64_t)q[i + 2] << 32);
++				uint32_t words = q[i + 3];
++				for (uint32_t g2 = 0; g2 < GEM_MAX; g2++) {
++					struct sweet_gem *tg = &fGems[g2];
++
++					if (tg->md == NULL || tg->kva == NULL || va < tg->iova ||
++					    va >= tg->iova + tg->size) {
++						continue;
++					}
++					volatile uint32_t *rq =
++					    (volatile uint32_t *)(void *)(tg->kva + (va - tg->iova));
++					uint32_t m = words > 64 ? 64 : words;
++
++					IOLog("SWEET ADRENO:   nested ib %#llx at %u, %u dwords\n", va, i, words);
++					for (uint32_t k = 0; k + 8 <= m; k += 8) {
++						IOLog("SWEET ADRENO:   n%03u: %#010x %#010x %#010x %#010x %#010x %#010x %#010x %#010x\n",
++						    k, rq[k], rq[k + 1], rq[k + 2], rq[k + 3], rq[k + 4],
++						    rq[k + 5], rq[k + 6], rq[k + 7]);
++					}
++					break;
++				}
++				i += cnt;
++			}
+ 		}
+ 	}
+ 	/*
