@@ -1,0 +1,52 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -2268,6 +2268,22 @@
+ 	return true;
+ }
+ 
++/* What the GPU would find at this address: the PTE the page tables hold, or 0. */
++uint64_t
++sweet_gpu_vm_lookup(uint64_t iova)
++{
++	volatile uint64_t *l3;
++
++	if (!gpu_live || !gpu_va_to_local(iova, 0x1000, NULL)) {
++		return 0;
++	}
++	l3 = gpu_l3_for(iova);
++	if (l3 == NULL) {
++		return 0;
++	}
++	return l3[(iova >> 12) & 0x1ff];
++}
++
+ void
+ sweet_gpu_vm_unmap(uint64_t iova, uint64_t size)
+ {
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -39,7 +39,8 @@
+ #include "SweetSurface.h"
+ 
+ extern "C" {
+-extern "C" vm_offset_t ml_io_map(vm_offset_t, vm_size_t);   /* osfmk/vm */
++extern "C" vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++extern "C" uint64_t sweet_gpu_vm_lookup(uint64_t);   /* osfmk/vm */
+ /* bsd/dev/sweet_a630.c: the kept-up GPU. Not thread safe; this file holds gAdrenoLock around every call. */
+ bool sweet_gpu_ready(void);
+ bool sweet_gpu_param(uint32_t which, uint64_t *value);
+@@ -823,6 +824,14 @@
+ 					if (off + words > total) {
+ 						words = total - off;
+ 					}
++					if ((h & 0xf0000000u) == 0x70000000u &&
++					    ((h >> 16) & 0x7fu) == 0x3fu) {
++						uint64_t tva = (uint64_t)q[off + 1] |
++						    ((uint64_t)q[off + 2] << 32);
++
++						IOLog("SWEET ADRENO: packet probe: indirect -> %#llx, pte %#llx\n",
++						    tva, sweet_gpu_vm_lookup(tva));
++					}
+ 					uint64_t va = ib[0];
+ 					uint32_t prefix = off + words;
+ 					uint32_t pf = sweet_gpu_submit(&va, &prefix, 1);
