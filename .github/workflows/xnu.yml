@@ -73,6 +73,18 @@ jobs:
           set -o pipefail
           bash build.sh 2>&1 | tee build.log
 
+      - name: Fail when a polaris patch was skipped
+        working-directory: dxb
+        run: |
+          set -e
+          skipped=$(grep "Skipping patch" build.log | grep -E "polaris" | sed -E "s/.*patches\\///; s/ .*//" | sort -u || true)
+          if [ -n "$skipped" ]; then
+            echo "::error::these polaris patches did not apply:"
+            echo "$skipped"
+            exit 1
+          fi
+          echo "all polaris patches applied"
+
       - name: Dump sources for patch verification
         if: always()
         working-directory: dxb
