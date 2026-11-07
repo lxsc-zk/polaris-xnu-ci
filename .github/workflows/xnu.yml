@@ -78,10 +78,12 @@ jobs:
         working-directory: dxb
         run: |
           {
-            echo "=== CONSOLE MUTE ==="
-            grep -n -B4 -A4 sweet_console_muted xnu/osfmk/console/serial_console.c
-            echo "=== ADRENO SELECTOR LOG ==="
-            grep -n "SWEET ADRENO: selector" xnu/iokit/Kernel/arm/SweetAdreno.cpp
+            echo "=== SUBMIT WAIT ==="
+            grep -n -B3 -A3 gpu_ring_wait_idle xnu/bsd/dev/sweet_gpu.c
+            echo "=== PRESENT TAIL ==="
+            grep -n -B2 -A8 "fConsolePaused" xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
+            echo "=== VSYNC TIMER ==="
+            grep -n -B2 -A6 "sweetfb_hz\|fVsyncTicks" xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
             echo "=== END DUMPS ==="
           } >> build.log 2>&1 || true
       - name: Extract errors
