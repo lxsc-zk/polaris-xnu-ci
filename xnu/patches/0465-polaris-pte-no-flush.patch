@@ -1,0 +1,31 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -2255,10 +2255,23 @@
+ 	volatile uint64_t *l3 = gpu_l3_for(iova);
+ 	if (l3 == NULL) {
+ 		return false;
+ 	}
+-	l3[(iova >> 12) & 0x1ff] = (pa & ~0xfffull) | GPU_PTE_PAGE |
+-	    (readonly ? (1ull << 7) : 0ull);
+-	__asm__ volatile("dsb sy" ::: "memory");
+-	gpu_tlb_invalidate();
+-	return true;
++	{
++		uint32_t slot = (iova >> 12) & 0x1ff;
++		uint64_t old = l3[slot];
++
++		l3[slot] = (pa & ~0xfffull) | GPU_PTE_PAGE |
++		    (readonly ? (1ull << 7) : 0ull);
++		__asm__ volatile("dsb sy" ::: "memory");
++		/*
++		 * Only a replaced entry can leave a stale TLB line behind. A fresh mapping has no
++		 * line to invalidate, and invalidating anyway ran the two-bank TLBSTATUS poll below
++		 * once per 4 KiB PTE: a 13.8 MB surface is 3384 PTEs, which is what made the
++		 * compositor produce a frame every few seconds.
++		 */
++		if (old != 0) {
++			gpu_tlb_invalidate();
++		}
++	}
++	return true;
+ }
