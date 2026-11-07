@@ -1,0 +1,29 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -2328,8 +2328,20 @@
+ 	gpu_ring_emit(gpu_blob + GPU_CP_RING, ++gpu_cp_seq);
+-	gpu_ring_flush(gpu_core, gpu_cp_wptr);
+-
+-	if (!gpu_ring_wait_idle(gpu_core, "submit")) {
+-		return 0;
+-	}
+-	return gpu_cp_seq;
++	gpu_ring_flush(gpu_core, gpu_cp_wptr);
++
++	/*
++	 * Do not drain the ring on every submission. This is the per-submit path and the wait
++	 * is a register-polling spin, so the submitting thread (and with it the compositor)
++	 * stalled on the GPU each time: the UI refreshed seconds apart. The fence written
++	 * below already orders the client; only step in when the ring is close to full.
++	 */
++	{
++		uint32_t rptr = gpu_cp_rd(gpu_core, A6XX_CP_RB_RPTR);
++
++		if ((uint32_t)(gpu_cp_wptr - rptr) > 4096u) {
++			if (!gpu_ring_wait_idle(gpu_core, "ring full")) {
++				return 0;
++			}
++		}
++	}
++	return gpu_cp_seq;
+ }
