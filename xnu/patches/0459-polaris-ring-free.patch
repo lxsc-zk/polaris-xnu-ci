@@ -1,0 +1,25 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -2336,8 +2336,17 @@
+ 		uint32_t rptr = gpu_cp_rd(gpu_core, A6XX_CP_RB_RPTR);
+ 
+-		if ((uint32_t)(gpu_cp_wptr - rptr) > 4096u) {
+-			if (!gpu_ring_wait_idle(gpu_core, "ring full")) {
+-				return 0;
+-			}
+-		}
++		/*
++		 * Both indices wrap at GPU_CP_RING_BYTES / 4, so a plain subtraction turns into a
++		 * huge positive number the moment WPTR wraps past RPTR - which made this branch
++		 * always taken and kept every submission draining the ring. Compare the free space
++		 * properly and only wait when the ring is nearly full.
++		 */
++		uint32_t dwords = GPU_CP_RING_BYTES / 4u;
++		uint32_t used = (gpu_cp_wptr + dwords - (rptr % dwords)) % dwords;
++
++		if (used > dwords - 512u) {
++			if (!gpu_ring_wait_idle(gpu_core, "ring full")) {
++				return 0;
++			}
++		}
+ 	}
