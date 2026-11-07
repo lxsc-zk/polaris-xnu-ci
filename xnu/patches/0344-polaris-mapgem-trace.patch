@@ -1,0 +1,18 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -386,7 +386,14 @@
+ 			 * (fence 7) because the shader and constant fetches landed in a hole.
+ 			 */
+ 			for (uint32_t k = 0; k < PAGE_SIZE; k += 0x1000) {
+-				if (!sweet_gpu_vm_map(iova + mapped + k, pa + k, ro)) {
++				bool mv = sweet_gpu_vm_map(iova + mapped + k, pa + k, ro);
++				uint64_t after = sweet_gpu_vm_lookup(iova + mapped + k);
++
++				if (mapped < 2 * PAGE_SIZE) {
++					IOLog("SWEET ADRENO: mapGem k=%u iova %#llx pa %#llx -> map %d pte %#llx\n",
++					    k, iova + mapped + k, pa + k, mv ? 1 : 0, after);
++				}
++				if (!mv) {
+ 					ok = false;
+ 					break;
+ 				}
