@@ -1,0 +1,34 @@
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -283,7 +283,31 @@
+ 
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	sweet_log_append(c, size);
++	/*
++	 * The port's own drivers log per submit, per BO and per kext call, which floods
++	 * the panel and hides the GUI. sweet_log_append() above already ran, so every
++	 * line still reaches the persistent log; only drawing is skipped.
++	 */
++	if (!panic_active()) {
++		static const char *const quiet[] = {
++		    "SWEET ADRENO:", "SWEET GPU:", "SWEET AKS:", "SWEET HB",
++		    "SWEET HID:", "SWEET METAL:", "IOK ",
++		};
++		int skip = sweet_console_muted != 0;
++
++		for (unsigned k = 0; !skip && k < (unsigned)(sizeof(quiet) / sizeof(quiet[0])); k++) {
++			const char *q = quiet[k];
++			int m = 0;
++
++			while (q[m] != 0 && m < size && c[m] == q[m]) {
++				m++;
++			}
++			if (q[m] == 0) {
++				skip = 1;
++			}
++		}
++		if (skip) {
++			return;
++		}
++	}
+ #endif
