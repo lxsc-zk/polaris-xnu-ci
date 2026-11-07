@@ -77,9 +77,13 @@ jobs:
         if: always()
         working-directory: dxb
         run: |
-          grep -n sweet_gpu_vm_map xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -30
-          grep -n "ok = pa" xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -10
-          grep -c "Skipping patch" build.log || true
+          {
+            echo ""
+            echo "=== MAPGEM DUMP ==="
+            grep -n sweet_gpu_vm_map xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -30
+            grep -n "ok = pa" xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -10
+            echo "=== END MAPGEM DUMP ==="
+          } >> build.log 2>&1 || true
       - name: Extract errors
         if: always()
         working-directory: dxb
