@@ -78,10 +78,12 @@ jobs:
         working-directory: dxb
         run: |
           {
-            echo "=== SELECTOR CONTEXT ==="
-            awk 'NR>=1092 && NR<=1108 {printf "%d| %s\n", NR, $0}' xnu/iokit/Kernel/arm/SweetAdreno.cpp
-            echo "=== GEM NEW LINE ==="
-            grep -n "gem new" xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -3
+            echo "=== BOOT VLVL ==="
+            grep -n -B4 -A4 "boot_vlvl" xnu/bsd/dev/sweet_gpu.c | head -40
+            echo "=== WAITFENCE ==="
+            awk 'NR>=266 && NR<=300 {printf "%d| %s\n", NR, $0}' xnu/iokit/Kernel/arm/SweetAdreno.cpp
+            echo "=== VSYNC COPY ==="
+            grep -n -B3 -A12 "fDirty" xnu/iokit/Kernel/arm/SweetFramebuffer.cpp | head -60
             echo "=== END DUMPS ==="
           } >> build.log 2>&1 || true
       - name: Extract errors
