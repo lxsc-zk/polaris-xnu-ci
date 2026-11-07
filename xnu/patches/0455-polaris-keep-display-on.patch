@@ -1,0 +1,26 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -885,7 +885,23 @@
+ 				fFB->fFadeStep = 0;
+ 				fFB->fDirty = true;     /* on: redraw the latest frame */
+ 			}
+ 			IOLockUnlock(fFB->fLock);
+ 			IOLog("SWEET FB: display %s\n", off ? "off" : "on");
++			/*
++			 * sweetfb_keepon: iOS asks the display to sleep after a while (auto-lock) and
++			 * SweetHID has no wake path, so the panel would stay black with no way back.
++			 * Keep scanning out instead; the request is still logged.
++			 */
++			{
++				int keepon = 0;
++
++				if (PE_parse_boot_argn("sweetfb_keepon", &keepon, sizeof(keepon)) && keepon != 0 && off) {
++					IOLockLock(fFB->fLock);
++					fFB->fPowerOff = false;
++					fFB->fDirty = true;
++					IOLockUnlock(fFB->fLock);
++					IOLog("SWEET FB: display off ignored (sweetfb_keepon)\n");
++				}
++			}
+ 		}
+ 		break;
