@@ -77,13 +77,8 @@ jobs:
           if: always()
           working-directory: dxb
           run: |
-            echo "=== mapGem region ==="
-            sed -n '/^SweetAdrenoUserClient::mapGem/,/^}/p' xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -80
-            echo "=== vm_map ==="
-            grep -n "sweet_gpu_vm_map" xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -20
-            echo "=== applied patches ==="
+            grep -n "sweet_gpu_vm_map\|ok = pa != 0" xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -30
             grep -c "Skipping patch" build.log || true
-
       - name: Extract errors
         if: always()
         working-directory: dxb
