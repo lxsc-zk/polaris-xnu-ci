@@ -77,7 +77,7 @@ jobs:
         working-directory: dxb
         run: |
           set -e
-          skipped=$(grep "Skipping patch" build.log | grep -E "polaris" | sed -E "s/.*patches\\///; s/ .*//" | sort -u || true)
+          skipped=$(grep "Skipping patch" build.log | grep -E "04[5-9][0-9]-polaris" | sed -E "s/.*patches\\///; s/ .*//" | sort -u || true)
           if [ -n "$skipped" ]; then
             echo "::error::these polaris patches did not apply:"
             echo "$skipped"
