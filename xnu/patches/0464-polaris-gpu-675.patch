@@ -1,0 +1,16 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -3249,6 +3249,12 @@
+ 	uint16_t gfx[16], mx[16], cx[16];
+ 	uint32_t a = 0;
+ 	unsigned ngfx = 0, nmx = 0, ncx = 0;
+-	const uint32_t boot_vlvl = 416;           /* 710 MHz: the top a630 entry in levels[] */
++	/*
++	 * Vote the highest level both ARC tables cover, not the vendor boot level. The gfx table
++	 * carries 416 but mx stops at 384, and the vote needs a match in both: asking for 416
++	 * made gpu_gx_rail_on() fail, the rail never came on and nothing reached the panel.
++	 * 384 is 675 MHz. There is no devfreq, so this is the session's clock.
++	 */
++	const uint32_t boot_vlvl = 384;           /* 675 MHz, the top level in both tables */
+ 	unsigned gi = 0, mi = 0;
+ 
