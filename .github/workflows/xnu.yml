@@ -78,10 +78,8 @@ jobs:
         working-directory: dxb
         run: |
           {
-            echo ""
             echo "=== MAPGEM DUMP ==="
-            grep -n sweet_gpu_vm_map xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -30
-            grep -n "ok = pa" xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -10
+            awk 'NR>=355 && NR<=400 {printf "%d| %s\n", NR, $0}' xnu/iokit/Kernel/arm/SweetAdreno.cpp
             echo "=== END MAPGEM DUMP ==="
           } >> build.log 2>&1 || true
       - name: Extract errors
