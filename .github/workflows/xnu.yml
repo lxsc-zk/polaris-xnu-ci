@@ -73,6 +73,17 @@ jobs:
           set -o pipefail
           bash build.sh 2>&1 | tee build.log
 
+        - name: Dump mapGem for patch verification
+          if: always()
+          working-directory: dxb
+          run: |
+            echo "=== mapGem region ==="
+            sed -n '/^SweetAdrenoUserClient::mapGem/,/^}/p' xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -80
+            echo "=== vm_map ==="
+            grep -n "sweet_gpu_vm_map" xnu/iokit/Kernel/arm/SweetAdreno.cpp | head -20
+            echo "=== applied patches ==="
+            grep -c "Skipping patch" build.log || true
+
       - name: Extract errors
         if: always()
         working-directory: dxb
