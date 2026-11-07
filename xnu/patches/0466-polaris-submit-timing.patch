@@ -1,0 +1,64 @@
+--- a/bsd/dev/sweet_gpu.c
++++ b/bsd/dev/sweet_gpu.c
+@@ -18,4 +18,6 @@
+ #include <sys/param.h>
+ #include <sys/systm.h>
+-#include <machine/machine_routines.h>
++#include <machine/machine_routines.h>
++#include <kern/clock.h>          /* absolutetime_to_nanoseconds */
++#include <mach/mach_time.h>
+ #include <pexpert/pexpert.h>
+@@ -2301,7 +2301,9 @@
+ uint32_t
+-sweet_gpu_submit(const uint64_t *ib_iova, const uint32_t *ib_dwords, unsigned count)
+-{
+-	if (!gpu_live || ib_iova == NULL || ib_dwords == NULL || count == 0) {
+-		return 0;
+-	}
++sweet_gpu_submit(const uint64_t *ib_iova, const uint32_t *ib_dwords, unsigned count)
++{
++	uint64_t t0 = mach_absolute_time();
++
++	if (!gpu_live || ib_iova == NULL || ib_dwords == NULL || count == 0) {
++		return 0;
++	}
+ 	for (unsigned i = 0; i < count; i++) {
+@@ -2341,10 +2341,31 @@
+ 		uint32_t used = (gpu_cp_wptr + dwords - (rptr % dwords)) % dwords;
+ 
+-		if (used > dwords - 512u) {
+-			if (!gpu_ring_wait_idle(gpu_core, "ring full")) {
+-				return 0;
+-			}
+-		}
+-	}
+-	return gpu_cp_seq;
++		if (used > dwords - 512u) {
++			if (!gpu_ring_wait_idle(gpu_core, "ring full")) {
++				return 0;
++			}
++		}
++	}
++	{
++		/*
++		 * How long our own submit path takes, averaged over 32 calls. The compositor
++		 * produced a frame every dozen seconds with the ring empty, so the time is either
++		 * here or in the client's wait; this separates the two.
++		 */
++		static uint64_t t_sum, t_worst;
++		static unsigned t_n;
++		uint64_t t_ns = 0;
++
++		absolutetime_to_nanoseconds(mach_absolute_time() - t0, &t_ns);
++		t_sum += t_ns;
++		if (t_ns > t_worst) {
++			t_worst = t_ns;
++		}
++		if (++t_n == 32) {
++			IOLog("SWEET ADRENO: submit timing: avg %llu us worst %llu us over %u\n",
++			    t_sum / 32 / 1000, t_worst / 1000, t_n);
++			t_sum = 0; t_worst = 0; t_n = 0;
++		}
++	}
++	return gpu_cp_seq;
+ }
