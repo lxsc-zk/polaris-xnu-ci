@@ -73,14 +73,16 @@ jobs:
           set -o pipefail
           bash build.sh 2>&1 | tee build.log
 
-      - name: Dump mapGem for patch verification
+      - name: Dump sources for patch verification
         if: always()
         working-directory: dxb
         run: |
           {
-            echo "=== MAPGEM DUMP ==="
-            awk 'NR>=355 && NR<=400 {printf "%d| %s\n", NR, $0}' xnu/iokit/Kernel/arm/SweetAdreno.cpp
-            echo "=== END MAPGEM DUMP ==="
+            echo "=== CONSOLE MUTE ==="
+            grep -n -B4 -A4 sweet_console_muted xnu/osfmk/console/serial_console.c
+            echo "=== ADRENO SELECTOR LOG ==="
+            grep -n "SWEET ADRENO: selector" xnu/iokit/Kernel/arm/SweetAdreno.cpp
+            echo "=== END DUMPS ==="
           } >> build.log 2>&1 || true
       - name: Extract errors
         if: always()
