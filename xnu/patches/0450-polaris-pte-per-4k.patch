@@ -1,0 +1,25 @@
+--- a/iokit/Kernel/arm/SweetAdreno.cpp
++++ b/iokit/Kernel/arm/SweetAdreno.cpp
+@@ -375,7 +375,21 @@
+ 			IOLog("SWEET GPU: mapGem page %llu iova %#llx pa %#llx\n",
+ 			    mapped / PAGE_SIZE, iova + mapped, pa);
+ 		}
+-		ok = pa != 0 && (pa & (PAGE_SIZE - 1)) == 0 && sweet_gpu_vm_map(iova + mapped, pa, ro);
++		ok = pa != 0 && (pa & (PAGE_SIZE - 1)) == 0;
++		if (ok) {
++			/*
++			 * sweet_gpu_vm_map() writes ONE 4 KiB PTE and PAGE_SIZE here is 16 KiB, so mapping
++			 * once per page left three quarters of every buffer unmapped: the CP jumped into a
++			 * hole (the nested command buffer's address read back as PTE 0) and wedged with
++			 * rbbm_status 0x800005, its fence never retired. Map every 4 KiB of the page.
++			 */
++			for (uint32_t k = 0; k < PAGE_SIZE; k += 0x1000) {
++				if (!sweet_gpu_vm_map(iova + mapped + k, pa + k, ro)) {
++					ok = false;
++					break;
++				}
++			}
++		}
+ 		if (!ok) {
+ 			IOLog("SWEET GPU: mapGem page %llu of %llu failed: iova %#llx pa %#llx\n",
+ 			    mapped / PAGE_SIZE, size / PAGE_SIZE, iova, pa);
